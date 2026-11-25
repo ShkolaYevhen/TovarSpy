@@ -1,0 +1,313 @@
+{
+  "$defs": {
+    "AdRecord": {
+      "description": "Normalized active ad record extracted from an ad spy source.",
+      "properties": {
+        "ad_id": {
+          "title": "Ad Id",
+          "type": "string"
+        },
+        "page_name": {
+          "title": "Page Name",
+          "type": "string"
+        },
+        "landing_url": {
+          "title": "Landing Url",
+          "type": "string"
+        },
+        "days_running": {
+          "minimum": 0,
+          "title": "Days Running",
+          "type": "integer"
+        },
+        "ad_creative_image_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ad Creative Image Url"
+        },
+        "active_ad_sets": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Active Ad Sets",
+          "type": "integer"
+        },
+        "countries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Countries",
+          "type": "array"
+        },
+        "source": {
+          "default": "meta",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ad_id",
+        "page_name",
+        "landing_url",
+        "days_running"
+      ],
+      "title": "AdRecord",
+      "type": "object"
+    },
+    "LandingPageData": {
+      "description": "Extracted product metadata and platform fingerprint from a landing page.",
+      "properties": {
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "final_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Url"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "price": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currency"
+        },
+        "image_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Url"
+        },
+        "platform": {
+          "default": "Custom PHP",
+          "title": "Platform",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "LandingPageData",
+      "type": "object"
+    },
+    "MarginResult": {
+      "description": "Profitability calculation output for a product offer.",
+      "properties": {
+        "retail_price_usd": {
+          "minimum": 0,
+          "title": "Retail Price Usd",
+          "type": "number"
+        },
+        "china_wholesale_price_usd": {
+          "minimum": 0,
+          "title": "China Wholesale Price Usd",
+          "type": "number"
+        },
+        "shipping_cost_est_usd": {
+          "default": 2.5,
+          "title": "Shipping Cost Est Usd",
+          "type": "number"
+        },
+        "est_cpa_usd": {
+          "default": 6.0,
+          "title": "Est Cpa Usd",
+          "type": "number"
+        },
+        "net_margin_usd": {
+          "title": "Net Margin Usd",
+          "type": "number"
+        },
+        "profitability_index": {
+          "default": 0.0,
+          "title": "Profitability Index",
+          "type": "number"
+        },
+        "is_winner": {
+          "default": false,
+          "title": "Is Winner",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "retail_price_usd",
+        "china_wholesale_price_usd",
+        "net_margin_usd"
+      ],
+      "title": "MarginResult",
+      "type": "object"
+    },
+    "SupplierOffer": {
+      "description": "Matched 1688.com wholesale supplier offer.",
+      "properties": {
+        "supplier_name": {
+          "title": "Supplier Name",
+          "type": "string"
+        },
+        "product_title": {
+          "title": "Product Title",
+          "type": "string"
+        },
+        "product_url": {
+          "title": "Product Url",
+          "type": "string"
+        },
+        "wholesale_price_rmb": {
+          "minimum": 0,
+          "title": "Wholesale Price Rmb",
+          "type": "number"
+        },
+        "wholesale_price_usd": {
+          "minimum": 0,
+          "title": "Wholesale Price Usd",
+          "type": "number"
+        },
+        "rating": {
+          "anyOf": [
+            {
+              "maximum": 5.0,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rating"
+        },
+        "years_on_1688": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Years On 1688"
+        },
+        "moq": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Moq",
+          "type": "integer"
+        },
+        "image_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Url"
+        }
+      },
+      "required": [
+        "supplier_name",
+        "product_title",
+        "product_url",
+        "wholesale_price_rmb",
+        "wholesale_price_usd"
+      ],
+      "title": "SupplierOffer",
+      "type": "object"
+    }
+  },
+  "description": "Complete end-to-end analysis report for a single ad/product candidate.",
+  "properties": {
+    "ad": {
+      "$ref": "#/$defs/AdRecord"
+    },
+    "landing": {
+      "$ref": "#/$defs/LandingPageData"
+    },
+    "suppliers": {
+      "items": {
+        "$ref": "#/$defs/SupplierOffer"
+      },
+      "title": "Suppliers",
+      "type": "array"
+    },
+    "best_supplier": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SupplierOffer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "margin": {
+      "$ref": "#/$defs/MarginResult"
+    },
+    "analyzed_at": {
+      "format": "date-time",
+      "title": "Analyzed At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ad",
+    "landing",
+    "margin"
+  ],
+  "title": "AnalyzedProductReport",
+  "type": "object"
+}
