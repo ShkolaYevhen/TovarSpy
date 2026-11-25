@@ -89,10 +89,14 @@ def _extract_raw_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
 def _parse_supplier_item(item: dict[str, Any], rmb_rate: float) -> Optional[SupplierOffer]:
     """Normalize a single 1688 API item into SupplierOffer."""
     product_block = item.get("item") if isinstance(item.get("item"), dict) else item
+    sku = product_block.get("sku") if isinstance(product_block.get("sku"), dict) else {}
+    sku_def = sku.get("def") if isinstance(sku.get("def"), dict) else {}
+
     price_rmb = _to_float(
         product_block.get("price")
         or product_block.get("wholesale_price_rmb")
         or product_block.get("sku_price")
+        or sku_def.get("price")
     )
     if price_rmb is None or price_rmb < 0:
         return None
@@ -101,13 +105,23 @@ def _parse_supplier_item(item: dict[str, Any], rmb_rate: float) -> Optional[Supp
     if price_usd is None:
         price_usd = round(price_rmb * rmb_rate, 2)
 
-    offer_id = product_block.get("num_iid") or product_block.get("offerId") or product_block.get("id") or "0"
+    offer_id = (
+        product_block.get("itemId")
+        or product_block.get("num_iid")
+        or product_block.get("offerId")
+        or product_block.get("id")
+        or "0"
+    )
     product_url = str(
         product_block.get("detail_url")
         or product_block.get("product_url")
+        or product_block.get("itemUrl")
         or product_block.get("url")
         or f"https://detail.1688.com/offer/{offer_id}.html"
     )
+    if product_url.startswith("//"):
+        product_url = f"https:{product_url}"
+
     seller_info = product_block.get("seller") if isinstance(product_block.get("seller"), dict) else {}
     supplier_name = str(
         product_block.get("supplier_name")
@@ -115,13 +129,29 @@ def _parse_supplier_item(item: dict[str, Any], rmb_rate: float) -> Optional[Supp
         or seller_info.get("name")
         or "1688 Verified Supplier"
     )
-    title = str(product_block.get("title") or product_block.get("subject") or "1688 Wholesale Product")
+    title = str(
+        product_block.get("titleEn")
+        or product_block.get("title")
+        or product_block.get("subject")
+        or "1688 Wholesale Product"
+    )
     rating = _to_float(product_block.get("rating") or seller_info.get("score"))
     if rating is not None:
         rating = max(0.0, min(5.0, rating))
     years = _to_int(product_block.get("years_on_1688") or seller_info.get("years"))
-    moq = max(1, _to_int(product_block.get("moq") or product_block.get("minOrderQuantity"), default=1) or 1)
+    moq = max(
+        1,
+        _to_int(
+            product_block.get("moq")
+            or product_block.get("minOrderQuantity")
+            or sku_def.get("minOrder"),
+            default=1,
+        )
+        or 1,
+    )
     img_url = product_block.get("pic_url") or product_block.get("image") or product_block.get("image_url")
+    if isinstance(img_url, str) and img_url.startswith("//"):
+        img_url = f"https:{img_url}"
 
     return SupplierOffer(
         supplier_name=supplier_name,
@@ -150,7 +180,7 @@ async def match_1688_suppliers(
     if not settings.RAPIDAPI_1688_KEY:
         return []
 
-    endpoint = f"https://{settings.RAPIDAPI_1688_HOST}/item_search_img"
+    endpoint = f"https://{settings.RAPIDAPI_1688_HOST}/item_search_image"
     headers = {
         "X-RapidAPI-Key": settings.RAPIDAPI_1688_KEY,
         "X-RapidAPI-Host": settings.RAPIDAPI_1688_HOST,

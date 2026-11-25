@@ -64,10 +64,11 @@ class TestChinaMatcher(unittest.IsolatedAsyncioTestCase):
                             },
                             {
                                 "item": {
-                                    "num_iid": "3",
-                                    "title": "Third Offer",
-                                    "price": "30.0",
-                                    "moq": 3,
+                                    "itemId": "3",
+                                    "titleEn": "Third Offer",
+                                    "itemUrl": "//detail.1688.com/offer/3.html",
+                                    "image": "//cbu01-overseas.1688.com/img/3.jpg",
+                                    "sku": {"def": {"price": "30.0", "minOrder": "3"}},
                                     "seller": {"name": "Supplier C", "score": "4.7", "years": "3"},
                                 }
                             },
@@ -84,6 +85,9 @@ class TestChinaMatcher(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(offers[0].wholesale_price_usd, 2.80)
         self.assertEqual(offers[0].years_on_1688, 6)
         self.assertEqual(offers[0].moq, 10)
+        self.assertEqual(offers[2].product_url, "https://detail.1688.com/offer/3.html")
+        self.assertEqual(offers[2].image_url, "https://cbu01-overseas.1688.com/img/3.jpg")
+        self.assertEqual(offers[2].moq, 3)
 
     async def test_missing_key_empty_image_and_http_error(self) -> None:
         empty_key_settings = Settings(_env_file=None)
