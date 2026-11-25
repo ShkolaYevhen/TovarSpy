@@ -164,8 +164,9 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", default="reports", help="Directory for CSV/JSON reports")
     parser.add_argument("--mock", action="store_true", help="Run offline deterministic dry-run mode")
     parser.add_argument("--no-telegram", action="store_true", help="Disable Telegram alerts")
-    parser.add_argument("--serve", action="store_true", help="Start local web dashboard after analysis")
-    parser.add_argument("--port", type=int, default=8000, help="Port for local web dashboard")
+    parser.add_argument("--serve", action="store_true", help="Start FastAPI web dashboard server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host interface for web dashboard")
+    parser.add_argument("--port", type=int, default=8000, help="Port for web dashboard")
     return parser.parse_args(argv)
 
 
@@ -182,31 +183,29 @@ def main(argv: Optional[list[str]] = None) -> int:
     countries = [c.strip().upper() for c in args.countries.split(",") if c.strip()] or None
     sources = [s.strip().lower() for s in args.sources.split(",") if s.strip()] or None
 
-    reports, exported = asyncio.run(
-        run_pipeline(
-            query=args.query,
-            countries=countries,
-            sources=sources,
-            output_dir=args.output_dir,
-            mock=args.mock,
-            send_alerts=not args.no_telegram,
-            settings=settings,
+    should_run_scan = not args.serve or bool(args.query or countries or sources or args.mock)
+    if should_run_scan:
+        reports, exported = asyncio.run(
+            run_pipeline(
+                query=args.query,
+                countries=countries,
+                sources=sources,
+                output_dir=args.output_dir,
+                mock=args.mock,
+                send_alerts=not args.no_telegram,
+                settings=settings,
+            )
         )
-    )
-    winners = sum(1 for r in reports if r.margin.is_winner)
-    print(f"Analyzed {len(reports)} offers ({winners} winners).")
-    print(f"CSV: {exported['csv']}")
-    print(f"JSON: {exported['json']}")
+        winners = sum(1 for r in reports if r.margin.is_winner)
+        print(f"Analyzed {len(reports)} offers ({winners} winners).")
+        print(f"CSV: {exported['csv']}")
+        print(f"JSON: {exported['json']}")
 
     if args.serve:
-        server = create_web_server(Path(exported["json"]), port=args.port)
-        print(f"Serving TovarSpy dashboard at http://127.0.0.1:{args.port}/")
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            server.shutdown()
-        finally:
-            server.server_close()
+        import uvicorn
+
+        print(f"Serving TovarSpy FastAPI dashboard at http://{args.host}:{args.port}/")
+        uvicorn.run("web_app:app", host=args.host, port=args.port)
 
     return 0
 

@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TovarSpy — E-Commerce Ad & Margin Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --bg-elev: #111827;
+      --bg-card: #141c2b;
+      --bg-hover: #1a2436;
+      --border: #232f45;
+      --border-strong: #32425e;
+      --text: #eef2f7;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.12);
+      --win: #10b981;
+      --win-soft: rgba(16, 185, 129, 0.14);
+      --warn: #f59e0b;
+      --warn-soft: rgba(245, 158, 11, 0.14);
+      --loss: #f43f5e;
+      --loss-soft: rgba(244, 63, 94, 0.14);
+      --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+    /* Top bar */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 24px;
+      background: rgba(11, 15, 23, 0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, #0ea5e9, #10b981);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 15px;
+      color: #06101b;
+      letter-spacing: -0.04em;
+    }
+    .brand-title {
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: -0.02em;
+    }
+    .brand-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--win);
+      box-shadow: 0 0 8px var(--win);
+    }
+    .status-dot.mock { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border-strong);
+      background: var(--bg-elev);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    }
+    .btn:hover:not(:disabled) {
+      background: var(--bg-hover);
+      border-color: var(--accent);
+      text-decoration: none;
+    }
+    .btn:active:not(:disabled) { transform: translateY(1px); }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-primary {
+      background: #0ea5e9;
+      border-color: #38bdf8;
+      color: #06101b;
+      font-weight: 600;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #38bdf8;
+      border-color: #7dd3fc;
+    }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+    .btn-win {
+      background: var(--win-soft);
+      border-color: rgba(16, 185, 129, 0.35);
+      color: #34d399;
+    }
+    .btn-win:hover:not(:disabled) {
+      background: rgba(16, 185, 129, 0.24);
+      border-color: var(--win);
+    }
+
+    /* Main container */
+    .container {
+      max-width: 1420px;
+      margin: 0 auto;
+      padding: 20px 24px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* KPI Strip */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .kpi-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .kpi-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .kpi-value {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi-sub {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .text-win { color: var(--win); }
+    .text-loss { color: var(--loss); }
+    .text-accent { color: var(--accent); }
+
+    /* Scan Runner Panel */
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .panel-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .runner-row {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.6fr) auto auto auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .input, .select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 13px;
+      padding: 8px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input:focus, .select:focus { border-color: var(--accent); }
+
+    .chips-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .group-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+      margin-right: 4px;
+    }
+    .chip {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border-strong);
+      background: var(--bg);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s;
+    }
+    .chip.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .toggle-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle-wrap input { accent-color: var(--accent); cursor: pointer; }
+
+    .thresholds-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .field label {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .field input { font-family: var(--mono); font-size: 12px; padding: 6px 9px; }
+
+    /* Filter Toolbar & Table */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--bg);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 960px;
+    }
+    th, td {
+      padding: 11px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    th {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      background: var(--bg-elev);
+      white-space: nowrap;
+    }
+    tbody tr {
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    tbody tr:hover { background: var(--bg-hover); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .prod-cell {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      max-width: 310px;
+    }
+    .prod-thumb {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      object-fit: cover;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .prod-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 245px;
+    }
+    .prod-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid var(--border-strong);
+      background: var(--bg-elev);
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .badge-win {
+      background: var(--win-soft);
+      border-color: rgba(16, 185, 129, 0.35);
+      color: #34d399;
+    }
+    .badge-loss {
+      background: var(--loss-soft);
+      border-color: rgba(244, 63, 94, 0.3);
+      color: #fb7185;
+    }
+    .badge-src {
+      background: var(--accent-soft);
+      border-color: rgba(56, 189, 248, 0.25);
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+
+    /* Slide-over Drawer */
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 7, 13, 0.7);
+      backdrop-filter: blur(4px);
+      z-index: 50;
+      display: none;
+      justify-content: flex-end;
+    }
+    .drawer-backdrop.open { display: flex; }
+    .drawer {
+      width: min(560px, 100vw);
+      height: 100%;
+      background: var(--bg-elev);
+      border-left: 1px solid var(--border-strong);
+      overflow-y: auto;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: -12px 0 40px rgba(0, 0, 0, 0.5);
+    }
+    .drawer-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 14px;
+    }
+    .drawer-hero {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+    .drawer-img {
+      width: 74px;
+      height: 74px;
+      border-radius: 10px;
+      object-fit: cover;
+      border: 1px solid var(--border-strong);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .waterfall {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .wf-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+    }
+    .wf-row.total {
+      border-top: 1px dashed var(--border-strong);
+      padding-top: 8px;
+      margin-top: 2px;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .supplier-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .supplier-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .supplier-card.best { border-color: rgba(16, 185, 129, 0.45); }
+    .supplier-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 80;
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 11px 16px;
+      font-size: 13px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      display: none;
+      max-width: 380px;
+    }
+    .toast.show { display: block; }
+    .toast.ok { border-color: var(--win); }
+    .toast.err { border-color: var(--loss); }
+
+    @media (max-width: 1024px) {
+      .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .runner-row { grid-template-columns: 1fr; }
+      .thresholds-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 640px) {
+      .container { padding: 14px; }
+      .kpi-grid { grid-template-columns: 1fr; }
+      .thresholds-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">TS</div>
+      <div>
+        <div class="brand-title">TovarSpy</div>
+        <div class="brand-sub">Ad Intelligence · 1688 Matching · Unit Margin</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span class="status-pill" id="modeBadge">
+        <span class="status-dot mock" id="modeDot"></span>
+        <span id="modeText">Mock Mode</span>
+      </span>
+      <span class="status-pill mono" id="updatedAt">Updated: —</span>
+      <a class="btn btn-sm" id="exportCsvBtn" href="#">Export CSV</a>
+      <a class="btn btn-sm" id="exportJsonBtn" href="#">Export JSON</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- KPI Strip -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Analyzed</div>
+        <div class="kpi-value" id="kpiTotal">0</div>
+        <div class="kpi-sub">Filtered active ad offers</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Winning Offers</div>
+        <div class="kpi-value text-win" id="kpiWinners">0</div>
+        <div class="kpi-sub" id="kpiWinRate">0% pass threshold</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Avg Net Margin</div>
+        <div class="kpi-value text-accent" id="kpiAvgMargin">$0.00</div>
+        <div class="kpi-sub">After COGS, Shipping &amp; CPA</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Peak Margin / Avg PI</div>
+        <div class="kpi-value" id="kpiPeakMargin">$0.00</div>
+        <div class="kpi-sub mono" id="kpiAvgRoi">Avg PI: 0.00x</div>
+      </div>
+    </section>
+
+    <!-- Scan Runner & Thresholds -->
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">Scan Runner &amp; Threshold Overrides</div>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+          <label class="toggle-wrap">
+            <input type="checkbox" id="toggleMock" checked />
+            <span>Mock / Dry-Run</span>
+          </label>
+          <label class="toggle-wrap">
+            <input type="checkbox" id="toggleAutoAlert" />
+            <span>Auto-Telegram Winners</span>
+          </label>
+          <button class="btn btn-sm" type="button" id="toggleThresholdsBtn">Thresholds ▾</button>
+        </div>
+      </div>
+
+      <div class="runner-row">
+        <input class="input" id="scanQuery" type="text" placeholder="Search keyword (e.g. neck massager, sunset lamp)..." />
+        <button class="btn btn-primary" id="runScanBtn" type="button">Run Spy Scan</button>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;">
+        <div class="chips-group" id="countryChips">
+          <span class="group-label">Countries:</span>
+        </div>
+        <div class="chips-group" id="sourceChips">
+          <span class="group-label">Sources:</span>
+        </div>
+      </div>
+
+      <div class="thresholds-grid" id="thresholdsPanel" style="display:none;">
+        <div class="field">
+          <label for="thMinDays">Min Active Days</label>
+          <input class="input" id="thMinDays" type="number" min="0" step="1" />
+        </div>
+        <div class="field">
+          <label for="thMinSets">Min Active Ad Sets</label>
+          <input class="input" id="thMinSets" type="number" min="1" step="1" />
+        </div>
+        <div class="field">
+          <label for="thShipping">Est. Shipping (USD)</label>
+          <input class="input" id="thShipping" type="number" min="0" step="0.1" />
+        </div>
+        <div class="field">
+          <label for="thCpa">Est. CPA (USD)</label>
+          <input class="input" id="thCpa" type="number" min="0" step="0.5" />
+        </div>
+        <div class="field">
+          <label for="thWinnerMin">Winner Net Margin ($)</label>
+          <input class="input" id="thWinnerMin" type="number" step="0.5" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Offers Table -->
+    <section class="panel">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <input class="input" id="filterSearch" type="text" placeholder="Filter by title, advertiser, platform..." style="width:240px;" />
+          <select class="select" id="filterCountry" style="width:140px;">
+            <option value="">All Countries</option>
+          </select>
+          <label class="toggle-wrap">
+            <input type="checkbox" id="filterWinnersOnly" />
+            <span>Winners Only</span>
+          </label>
+        </div>
+        <div class="toolbar-left">
+          <span class="group-label">Sort by:</span>
+          <select class="select" id="sortField" style="width:170px;">
+            <option value="margin">Net Margin (High → Low)</option>
+            <option value="roi">Profitability Index</option>
+            <option value="days">Days Running</option>
+            <option value="sets">Active Ad Sets</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Product / Advertiser</th>
+              <th>Source &amp; Geo</th>
+              <th>Scale</th>
+              <th>Retail</th>
+              <th>1688 COGS</th>
+              <th>Net Margin</th>
+              <th>PI</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="offersBody">
+            <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:28px;">Loading offers...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Slide-over Detail Drawer -->
+  <div class="drawer-backdrop" id="drawerBackdrop">
+    <aside class="drawer" aria-label="Offer Details">
+      <div class="drawer-head">
+        <div class="drawer-hero">
+          <img class="drawer-img" id="drawerImg" alt="Product" />
+          <div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
+              <span class="badge" id="drawerWinnerBadge"></span>
+              <span class="badge" id="drawerPlatform"></span>
+            </div>
+            <div style="font-size:16px;font-weight:700;" id="drawerTitle"></div>
+            <div class="prod-sub" id="drawerMeta"></div>
+          </div>
+        </div>
+        <button class="btn btn-sm" id="closeDrawerBtn" type="button">✕</button>
+      </div>
+
+      <div>
+        <div class="section-label">Margin Waterfall (USD)</div>
+        <div class="waterfall" id="drawerWaterfall"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <a class="btn btn-sm" id="drawerLandingLink" target="_blank" rel="noopener">Open Landing Page ↗</a>
+        <a class="btn btn-sm" id="drawerAdLink" target="_blank" rel="noopener">Ad Creative ↗</a>
+        <button class="btn btn-sm btn-win" id="drawerAlertBtn" type="button">Send Telegram Alert</button>
+      </div>
+
+      <div>
+        <div class="section-label">Top-3 Matched 1688 Suppliers</div>
+        <div class="supplier-list" id="drawerSuppliers"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const API_BASE = (location.pathname === '/spy' || location.pathname.startsWith('/spy/')) ? '/spy' : '';
+
+    const state = {
+      config: null,
+      report: null,
+      selectedCountries: new Set(),
+      selectedSources: new Set(),
+      selectedAdId: null,
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function esc(val) {
+      return String(val ?? '').replace(/[&<>"']/g, (ch) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+      ));
+    }
+
+    function showToast(msg, ok = true) {
+      const el = $('toast');
+      el.textContent = msg;
+      el.className = `toast show ${ok ? 'ok' : 'err'}`;
+      clearTimeout(showToast._timer);
+      showToast._timer = setTimeout(() => { el.className = 'toast'; }, 3600);
+    }
+
+    function initStaticLinks() {
+      $('exportCsvBtn').href = `${API_BASE}/api/export/csv`;
+      $('exportJsonBtn').href = `${API_BASE}/api/export/json`;
+    }
+
+    function renderChips() {
+      const cfg = state.config;
+      if (!cfg) return;
+
+      const cWrap = $('countryChips');
+      cWrap.innerHTML = '<span class="group-label">Countries:</span>';
+      cfg.target_countries.forEach((code) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `chip ${state.selectedCountries.has(code) ? 'active' : ''}`;
+        btn.textContent = code;
+        btn.onclick = () => {
+          if (state.selectedCountries.has(code)) state.selectedCountries.delete(code);
+          else state.selectedCountries.add(code);
+          renderChips();
+        };
+        cWrap.appendChild(btn);
+      });
+
+      const sWrap = $('sourceChips');
+      sWrap.innerHTML = '<span class="group-label">Sources:</span>';
+      cfg.available_sources.forEach((src) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `chip ${state.selectedSources.has(src) ? 'active' : ''}`;
+        btn.textContent = src.toUpperCase();
+        btn.onclick = () => {
+          if (state.selectedSources.has(src)) state.selectedSources.delete(src);
+          else state.selectedSources.add(src);
+          renderChips();
+        };
+        sWrap.appendChild(btn);
+      });
+
+      const filterCountry = $('filterCountry');
+      const prev = filterCountry.value;
+      filterCountry.innerHTML = '<option value="">All Countries</option>';
+      cfg.target_countries.forEach((c) => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        filterCountry.appendChild(opt);
+      });
+      filterCountry.value = prev;
+    }
+
+    function renderSummary() {
+      const report = state.report;
+      if (!report) return;
+      const s = report.summary || {};
+      const m = report.meta || {};
+      const total = s.total || 0;
+      const winners = s.winners || 0;
+      const rate = total ? Math.round((winners / total) * 100) : 0;
+
+      $('kpiTotal').textContent = total;
+      $('kpiWinners').textContent = winners;
+      $('kpiWinRate').textContent = `${rate}% pass winner margin`;
+      $('kpiAvgMargin').textContent = `$${Number(s.avg_net_margin_usd || 0).toFixed(2)}`;
+      $('kpiPeakMargin').textContent = `$${Number(s.max_net_margin_usd || 0).toFixed(2)}`;
+      $('kpiAvgRoi').textContent = `Avg PI: ${Number(s.avg_profitability_index || 0).toFixed(2)}x`;
+
+      const isMock = Boolean(m.mock);
+      $('modeDot').className = `status-dot ${isMock ? 'mock' : ''}`;
+      $('modeText').textContent = isMock ? 'Mock Mode' : 'Live Mode';
+      $('updatedAt').textContent = m.updated_at ? `Updated: ${new Date(m.updated_at).toLocaleTimeString()}` : 'Updated: —';
+    }
+
+    function getFilteredProducts() {
+      const products = (state.report && state.report.products) ? [...state.report.products] : [];
+      const q = $('filterSearch').value.trim().toLowerCase();
+      const geo = $('filterCountry').value;
+      const winnersOnly = $('filterWinnersOnly').checked;
+      const sortBy = $('sortField').value;
+
+      const filtered = products.filter((item) => {
+        if (winnersOnly && !item.margin.is_winner) return false;
+        if (geo && !(item.ad.countries || []).includes(geo)) return false;
+        if (q) {
+          const haystack = [
+            item.landing.title,
+            item.ad.page_name,
+            item.landing.platform,
+            item.ad.source,
+            item.ad.ad_id,
+          ].join(' ').toLowerCase();
+          if (!haystack.includes(q)) return false;
+        }
+        return true;
+      });
+
+      filtered.sort((a, b) => {
+        if (sortBy === 'roi') return b.margin.profitability_index - a.margin.profitability_index;
+        if (sortBy === 'days') return b.ad.days_running - a.ad.days_running;
+        if (sortBy === 'sets') return b.ad.active_ad_sets - a.ad.active_ad_sets;
+        return b.margin.net_margin_usd - a.margin.net_margin_usd;
+      });
+
+      return filtered;
+    }
+
+    function renderTable() {
+      const rows = getFilteredProducts();
+      const tbody = $('offersBody');
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:28px;">No matching offers for current filters.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = rows.map((item) => {
+        const ad = item.ad;
+        const l = item.landing;
+        const m = item.margin;
+        const img = l.image_url || ad.ad_creative_image_url || '';
+        const localPrice = l.price != null ? `${Number(l.price).toFixed(2)} ${esc(l.currency || '')}` : 'N/A';
+        const winBadge = m.is_winner
+          ? '<span class="badge badge-win">WINNER</span>'
+          : '<span class="badge badge-loss">BELOW</span>';
+        const marginClass = m.net_margin_usd >= 0 ? 'text-win' : 'text-loss';
+        const geos = (ad.countries || []).map((c) => `<span class="badge">${esc(c)}</span>`).join(' ');
+
+        return `
+          <tr data-ad-id="${esc(ad.ad_id)}">
+            <td>
+              <div class="prod-cell">
+                ${img ? `<img class="prod-thumb" src="${esc(img)}" alt="" onerror="this.style.visibility='hidden'" />` : '<div class="prod-thumb"></div>'}
+                <div>
+                  <div class="prod-title" title="${esc(l.title)}">${esc(l.title || 'Untitled Offer')}</div>
+                  <div class="prod-sub">${esc(ad.page_name)} · ${esc(l.platform)}</div>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                <span class="badge badge-src">${esc(ad.source)}</span>
+                ${geos}
+              </div>
+            </td>
+            <td class="mono">
+              <div>${ad.days_running}d active</div>
+              <div class="prod-sub">${ad.active_ad_sets} ad sets</div>
+            </td>
+            <td class="mono">
+              <div>$${Number(m.retail_price_usd).toFixed(2)}</div>
+              <div class="prod-sub">${localPrice}</div>
+            </td>
+            <td class="mono">$${Number(m.china_wholesale_price_usd).toFixed(2)}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="mono ${marginClass}" style="font-weight:700;">$${Number(m.net_margin_usd).toFixed(2)}</span>
+                ${winBadge}
+              </div>
+            </td>
+            <td class="mono">${Number(m.profitability_index).toFixed(2)}x</td>
+            <td>
+              <div style="display:flex;gap:6px;" onclick="event.stopPropagation()">
+                <button class="btn btn-sm" data-inspect="${esc(ad.ad_id)}" type="button">Inspect</button>
+                <button class="btn btn-sm btn-win" data-alert="${esc(ad.ad_id)}" type="button">Alert</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      tbody.querySelectorAll('tr[data-ad-id]').forEach((tr) => {
+        tr.onclick = () => openDrawer(tr.getAttribute('data-ad-id'));
+      });
+      tbody.querySelectorAll('button[data-inspect]').forEach((btn) => {
+        btn.onclick = () => openDrawer(btn.getAttribute('data-inspect'));
+      });
+      tbody.querySelectorAll('button[data-alert]').forEach((btn) => {
+        btn.onclick = () => sendAlert(btn.getAttribute('data-alert'));
+      });
+    }
+
+    function openDrawer(adId) {
+      const item = (state.report?.products || []).find((p) => p.ad.ad_id === adId);
+      if (!item) return;
+      state.selectedAdId = adId;
+
+      const ad = item.ad;
+      const l = item.landing;
+      const m = item.margin;
+
+      $('drawerImg').src = l.image_url || ad.ad_creative_image_url || '';
+      $('drawerTitle').textContent = l.title || 'Untitled Offer';
+      $('drawerMeta').textContent = `${ad.page_name} · ${ad.source.toUpperCase()} · ${ad.days_running}d / ${ad.active_ad_sets} ad sets`;
+      $('drawerPlatform').textContent = l.platform || 'Unknown';
+      $('drawerWinnerBadge').textContent = m.is_winner ? 'IS_WINNER' : 'BELOW THRESHOLD';
+      $('drawerWinnerBadge').className = `badge ${m.is_winner ? 'badge-win' : 'badge-loss'}`;
+
+      $('drawerLandingLink').href = l.final_url || l.url || '#';
+      if (ad.ad_creative_image_url) {
+        $('drawerAdLink').href = ad.ad_creative_image_url;
+        $('drawerAdLink').style.display = 'inline-flex';
+      } else {
+        $('drawerAdLink').style.display = 'none';
+      }
+
+      $('drawerWaterfall').innerHTML = `
+        <div class="wf-row"><span>Retail Price (USD)</span><span class="mono">$${m.retail_price_usd.toFixed(2)}</span></div>
+        <div class="wf-row"><span>− China Wholesale (1688)</span><span class="mono">−$${m.china_wholesale_price_usd.toFixed(2)}</span></div>
+        <div class="wf-row"><span>− Est. Air Cargo Shipping</span><span class="mono">−$${m.shipping_cost_est_usd.toFixed(2)}</span></div>
+        <div class="wf-row"><span>− Est. Facebook CPA</span><span class="mono">−$${m.est_cpa_usd.toFixed(2)}</span></div>
+        <div class="wf-row total">
+          <span>Net Margin (PI: ${m.profitability_index.toFixed(2)}x)</span>
+          <span class="mono ${m.net_margin_usd >= 0 ? 'text-win' : 'text-loss'}">$${m.net_margin_usd.toFixed(2)}</span>
+        </div>
+      `;
+
+      const suppliers = item.suppliers || [];
+      $('drawerSuppliers').innerHTML = suppliers.length
+        ? suppliers.map((s, idx) => `
+            <div class="supplier-card ${idx === 0 ? 'best' : ''}">
+              <div class="supplier-top">
+                <strong style="font-size:13px;">${esc(s.supplier_name)}</strong>
+                <span class="mono text-win" style="font-weight:700;">¥${s.wholesale_price_rmb.toFixed(2)} ($${s.wholesale_price_usd.toFixed(2)})</span>
+              </div>
+              <div class="prod-sub">${esc(s.product_title)}</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-muted);margin-top:2px;">
+                <span class="mono">Rating: ${s.rating ?? '—'} ★ · ${s.years_on_1688 ?? '—'}y · MOQ: ${s.moq}</span>
+                <a href="${esc(s.product_url)}" target="_blank" rel="noopener">Open 1688 ↗</a>
+              </div>
+            </div>
+          `).join('')
+        : '<div class="prod-sub">No 1688 suppliers matched.</div>';
+
+      $('drawerAlertBtn').onclick = () => sendAlert(ad.ad_id);
+      $('drawerBackdrop').classList.add('open');
+    }
+
+    function closeDrawer() {
+      $('drawerBackdrop').classList.remove('open');
+    }
+
+    async function loadInitial() {
+      try {
+        const [cfgRes, repRes] = await Promise.all([
+          fetch(`${API_BASE}/api/config`),
+          fetch(`${API_BASE}/api/report`),
+        ]);
+        state.config = await cfgRes.json();
+        state.report = await repRes.json();
+
+        state.selectedCountries = new Set(state.config.target_countries || []);
+        state.selectedSources = new Set(state.config.available_sources || []);
+        $('thMinDays').value = state.config.min_duration_days;
+        $('thMinSets').value = state.config.min_active_ad_sets;
+        $('thShipping').value = state.config.shipping_cost_est_usd;
+        $('thCpa').value = state.config.est_cpa_usd;
+        $('thWinnerMin').value = state.config.winner_net_margin_usd;
+
+        renderChips();
+        renderSummary();
+        renderTable();
+      } catch (err) {
+        showToast(`Failed to load dashboard: ${err.message}`, false);
+      }
+    }
+
+    async function runScan() {
+      const btn = $('runScanBtn');
+      btn.disabled = true;
+      btn.textContent = 'Scanning...';
+      try {
+        const payload = {
+          query: $('scanQuery').value.trim(),
+          countries: Array.from(state.selectedCountries),
+          sources: Array.from(state.selectedSources),
+          mock: $('toggleMock').checked,
+          send_alerts: $('toggleAutoAlert').checked,
+          min_duration_days: Number($('thMinDays').value),
+          min_active_ad_sets: Number($('thMinSets').value),
+          shipping_cost_est_usd: Number($('thShipping').value),
+          est_cpa_usd: Number($('thCpa').value),
+          winner_net_margin_usd: Number($('thWinnerMin').value),
+        };
+        const res = await fetch(`${API_BASE}/api/scan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        state.report = await res.json();
+        renderSummary();
+        renderTable();
+        showToast(`Scan finished: ${state.report.summary.total} offers (${state.report.summary.winners} winners).`, true);
+      } catch (err) {
+        showToast(`Scan failed: ${err.message}`, false);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Spy Scan';
+      }
+    }
+
+    async function sendAlert(adId) {
+      const useMock = !(state.config && state.config.telegram_configured);
+      try {
+        const res = await fetch(`${API_BASE}/api/alert`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ad_id: adId, mock: useMock }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        if (data.sent) {
+          showToast(
+            data.mock
+              ? `Mock Telegram preview generated for ${adId} (set TELEGRAM_BOT_TOKEN & CHAT_ID for live delivery).`
+              : `Telegram alert sent for ${adId}!`,
+            true
+          );
+        } else {
+          showToast(`Alert skipped for ${adId} (not a winner or Telegram unavailable).`, false);
+        }
+      } catch (err) {
+        showToast(`Alert error: ${err.message}`, false);
+      }
+    }
+
+    $('runScanBtn').onclick = runScan;
+    $('toggleThresholdsBtn').onclick = () => {
+      const p = $('thresholdsPanel');
+      p.style.display = p.style.display === 'none' ? 'grid' : 'none';
+    };
+    ['filterSearch', 'filterCountry', 'filterWinnersOnly', 'sortField'].forEach((id) => {
+      $(id).addEventListener('input', renderTable);
+      $(id).addEventListener('change', renderTable);
+    });
+    $('closeDrawerBtn').onclick = closeDrawer;
+    $('drawerBackdrop').onclick = (e) => { if (e.target === $('drawerBackdrop')) closeDrawer(); };
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+
+    initStaticLinks();
+    loadInitial();
+  </script>
+</body>
+</html>
