@@ -10,7 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
-from config import AdRecord, Settings, get_httpx_proxy
+from config import AdRecord, Settings, get_httpx_proxy, make_product_placeholder_svg
 from storage import get_cache, set_cache
 
 logger = logging.getLogger(__name__)
@@ -505,60 +505,66 @@ def generate_mock_ads(
             page_name="SmartRelax PL",
             landing_url="https://smartrelax-shop.pl/products/ems-neck-massager",
             days_running=14,
-            ad_creative_image_url="https://cdn.example.com/ads/neck-massager.jpg",
+            ad_creative_image_url=make_product_placeholder_svg("EMS Neck Massager"),
             active_ad_sets=9,
             countries=["PL", "DE"],
             source="meta",
+            is_live=False,
         ),
         AdRecord(
             ad_id="adheart-1002",
             page_name="HomeGlow UA",
             landing_url="https://homeglow.com.ua/sunset-projection-lamp",
             days_running=11,
-            ad_creative_image_url="https://cdn.example.com/ads/sunset-lamp.jpg",
+            ad_creative_image_url=make_product_placeholder_svg("Sunset LED Lamp"),
             active_ad_sets=6,
             countries=["UA", "RO"],
             source="adheart",
+            is_live=False,
         ),
         AdRecord(
             ad_id="tiktok-1003",
             page_name="AutoClean Pro",
             landing_url="https://autocleanpro.com/mini-car-vacuum",
             days_running=19,
-            ad_creative_image_url="https://cdn.example.com/ads/car-vacuum.jpg",
+            ad_creative_image_url=make_product_placeholder_svg("Mini Car Vacuum"),
             active_ad_sets=12,
             countries=["US", "DE", "CZ"],
             source="tiktok",
+            is_live=False,
         ),
         AdRecord(
             ad_id="meta-1004",
             page_name="PostureFit EU",
             landing_url="https://posturefit.tilda.ws/corrector",
             days_running=8,
-            ad_creative_image_url="https://cdn.example.com/ads/posture-corrector.jpg",
+            ad_creative_image_url=make_product_placeholder_svg("Posture Corrector"),
             active_ad_sets=5,
             countries=["CZ", "PL"],
             source="meta",
+            is_live=False,
         ),
         AdRecord(
             ad_id="meta-1005-short",
             page_name="FlashDrop",
             landing_url="https://flashdrop.example/short-run",
             days_running=4,
-            ad_creative_image_url="https://cdn.example.com/ads/short.jpg",
+            ad_creative_image_url=make_product_placeholder_svg("Short Run"),
             active_ad_sets=8,
             countries=["US"],
             source="meta",
+            is_live=False,
         ),
         AdRecord(
             ad_id="adheart-1006-lowscale",
             page_name="SmallTest",
             landing_url="https://smalltest.example/low-scale",
             days_running=15,
-            ad_creative_image_url="https://cdn.example.com/ads/low.jpg",
+            ad_creative_image_url=make_product_placeholder_svg("Low Scale"),
             active_ad_sets=3,
             countries=["UA"],
             source="adheart",
+            is_live=False,
         ),
     ]
 
@@ -577,20 +583,22 @@ def generate_curated_fallback_ads(
             page_name="KitchenLab UA",
             landing_url="https://kitchenlab.com.ua/thermal-lunch-box",
             days_running=16,
-            ad_creative_image_url="https://cdn.example.com/ads/thermal-lunchbox.jpg",
+            ad_creative_image_url=make_product_placeholder_svg("Thermal Lunchbox"),
             active_ad_sets=11,
             countries=["UA", "PL"],
             source="curated",
+            is_live=False,
         ),
         AdRecord(
             ad_id="curated-2002",
             page_name="PetCare DE",
             landing_url="https://petcare-eu.de/steam-pet-brush",
             days_running=13,
-            ad_creative_image_url="https://cdn.example.com/ads/pet-brush.jpg",
+            ad_creative_image_url=make_product_placeholder_svg("Steam Pet Brush"),
             active_ad_sets=8,
             countries=["DE", "PL", "CZ"],
             source="curated",
+            is_live=False,
         ),
     ]
     q = query.strip().lower()

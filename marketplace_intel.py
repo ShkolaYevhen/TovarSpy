@@ -517,3 +517,172 @@ async def analyze_marketplace_intel(
             )
 
     return _aggregate_intel_report(query, signals)
+
+
+def parse_prom_items(html: str, query: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Extract individual Prom.ua product cards with real images, UAH prices, and product links."""
+    if not html or _is_blocked_html(html):
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    uah_rate = DEFAULT_FX_RATES_TO_USD.get("UAH", 0.024)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for card in soup.select('[data-qaid="product_block"]'):
+        title_el = card.select_one('[data-qaid="product_name"]')
+        price_el = card.select_one('[data-qaid="product_price"]')
+        link_el = card.select_one('a[href*="/p"]') or card.select_one("a[href]")
+        if not title_el or not link_el:
+            continue
+        title = title_el.get_text(" ", strip=True)
+        href = urljoin("https://prom.ua", str(link_el["href"]))
+        if not title or href in seen:
+            continue
+        price_text = price_el.get_text(" ", strip=True) if price_el else card.get_text(" ", strip=True)
+        m_price = re.search(r"(\d[\d\s\u00a0]*(?:[.,]\d{1,2})?)", price_text)
+        price_uah = _parse_float(m_price.group(1)) if m_price else None
+        if price_uah is None:
+            continue
+        img_el = card.find("img")
+        img_url = ""
+        if img_el:
+            img_url = str(img_el.get("src") or img_el.get("data-src") or "").strip()
+            if img_url.startswith("//"):
+                img_url = "https:" + img_url
+        seller_el = card.select_one('[data-qaid="company_name"]')
+        seller = seller_el.get_text(" ", strip=True) if seller_el else "Prom.ua Seller"
+        seen.add(href)
+        items.append({
+            "source": "prom_ua",
+            "country": "UA",
+            "query": query,
+            "title": title[:160],
+            "price": price_uah,
+            "currency": "UAH",
+            "price_usd": round(price_uah * uah_rate, 2),
+            "image_url": img_url,
+            "product_url": href,
+            "seller_name": seller[:100],
+            "is_live": True,
+        })
+        if len(items) >= limit:
+            break
+    return items
+
+
+def parse_olx_items(html: str, query: str, domain: str = "ua", limit: int = 10) -> list[dict[str, Any]]:
+    """Extract individual OLX.ua or OLX.pl listing cards with real photos, prices, and links."""
+    if not html or _is_blocked_html(html):
+        return []
+    is_ua = domain.lower() == "ua"
+    source = "olx_ua" if is_ua else "olx_pl"
+    country = "UA" if is_ua else "PL"
+    currency = "UAH" if is_ua else "PLN"
+    base_url = "https://www.olx.ua" if is_ua else "https://www.olx.pl"
+    fx = DEFAULT_FX_RATES_TO_USD.get(currency, 0.024)
+
+    soup = BeautifulSoup(html, "html.parser")
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for card in soup.select('[data-cy="l-card"], [data-testid="l-card"]'):
+        title_el = card.select_one('h4, h6, [data-cy="ad-card-title"]')
+        price_el = card.select_one('[data-testid="ad-price"]')
+        link_el = card.select_one("a[href]")
+        if not title_el or not link_el:
+            continue
+        title = title_el.get_text(" ", strip=True)
+        href = urljoin(base_url, str(link_el["href"]))
+        if not title or href in seen:
+            continue
+        price_text = price_el.get_text(" ", strip=True) if price_el else card.get_text(" ", strip=True)
+        m_price = re.search(r"(\d[\d\s\u00a0]*(?:[.,]\d{1,2})?)", price_text)
+        price_val = _parse_float(m_price.group(1)) if m_price else None
+        if price_val is None:
+            continue
+        img_el = card.find("img")
+        img_url = ""
+        if img_el:
+            img_url = str(img_el.get("src") or img_el.get("data-src") or "").strip()
+            if img_url.startswith("//"):
+                img_url = "https:" + img_url
+        seen.add(href)
+        items.append({
+            "source": source,
+            "country": country,
+            "query": query,
+            "title": title[:160],
+            "price": price_val,
+            "currency": currency,
+            "price_usd": round(price_val * fx, 2),
+            "image_url": img_url,
+            "product_url": href,
+            "seller_name": f"OLX.{domain.upper()} Seller",
+            "is_live": True,
+        })
+        if len(items) >= limit:
+            break
+    return items
+
+
+async def fetch_live_marketplace_products(
+    query: str,
+    settings: Settings,
+    platforms: Optional[list[str]] = None,
+    limit_per_platform: int = 8,
+    client: Optional[httpx.AsyncClient] = None,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Fetch live marketplace product cards (Prom.ua, OLX.ua, OLX.pl) plus source diagnostics."""
+    selected = platforms or ["prom_ua", "olx_ua", "olx_pl"]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept-Language": "uk-UA,uk;q=0.9,pl;q=0.8,en;q=0.7",
+    }
+    q_enc = quote_plus(query or "масажер")
+    q_slug = quote_plus(query or "masazer").replace("+", "-")
+
+    async def _fetch_one(http_client: httpx.AsyncClient, plat: str) -> tuple[str, list[dict[str, Any]], str]:
+        cache_key = f"mkt_items:{plat}:{(query or '').strip().lower()}"
+        cached = get_cache(settings.DB_PATH, cache_key, settings.CACHE_TTL_SECONDS)
+        if isinstance(cached, list) and cached:
+            return plat, cached[:limit_per_platform], f"cached: {len(cached)} items"
+
+        if plat == "prom_ua":
+            url = f"https://prom.ua/ua/search?search_term={q_enc}&sort=popularity"
+            parser = lambda h: parse_prom_items(h, query, limit=limit_per_platform)
+        elif plat == "olx_ua":
+            url = f"https://www.olx.ua/uk/list/q-{q_slug}/"
+            parser = lambda h: parse_olx_items(h, query, domain="ua", limit=limit_per_platform)
+        elif plat == "olx_pl":
+            url = f"https://www.olx.pl/oferty/q-{q_slug}/"
+            parser = lambda h: parse_olx_items(h, query, domain="pl", limit=limit_per_platform)
+        else:
+            return plat, [], "unsupported"
+
+        try:
+            resp = await http_client.get(url, headers=headers)
+            if resp.status_code in (403, 429, 503):
+                return plat, [], f"blocked: HTTP {resp.status_code}"
+            if resp.status_code != 200:
+                return plat, [], f"empty: HTTP {resp.status_code}"
+            if _is_blocked_html(resp.text):
+                return plat, [], "blocked: CAPTCHA/anti-bot"
+            parsed = parser(resp.text)
+            if parsed:
+                set_cache(settings.DB_PATH, cache_key, parsed)
+                return plat, parsed, f"live: {len(parsed)} items"
+            return plat, [], "empty: 0 items"
+        except httpx.HTTPError as exc:
+            return plat, [], f"error: {exc}"
+
+    if client is not None:
+        results = await asyncio.gather(*(_fetch_one(client, p) for p in selected))
+    else:
+        proxy = get_httpx_proxy(settings)
+        async with httpx.AsyncClient(timeout=15.0, proxy=proxy, follow_redirects=True) as owned:
+            results = await asyncio.gather(*(_fetch_one(owned, p) for p in selected))
+
+    all_items: list[dict[str, Any]] = []
+    diagnostics: dict[str, str] = {}
+    for plat, items, status_msg in results:
+        all_items.extend(items)
+        diagnostics[plat] = status_msg
+    return all_items, diagnostics

@@ -52,9 +52,7 @@ class Settings(BaseSettings):
     DB_PATH: str = "output/tovarspy.db"
     PROXY_URL: str = ""
     CACHE_TTL_SECONDS: int = 21600
-    DEFAULT_TG_CHANNELS: list[str] = Field(
-        default_factory=lambda: ["drop_ua", "opt_drop_ua", "tovarka_ua_opt"]
-    )
+    DEFAULT_TG_CHANNELS: list[str] = Field(default_factory=list)
 
     # Co-founder unit economics defaults
     UA_COD_RETURN_RATE: float = 0.22
@@ -64,8 +62,48 @@ class Settings(BaseSettings):
     PAYMENT_FEE_PCT: float = 0.029
 
 
+CURATED_CATEGORIES: dict[str, dict[str, str]] = {
+    "home_kitchen": {
+        "label": "Home & Kitchen",
+        "en": "led sunset lamp",
+        "ua": "кухонний гаджет",
+        "pl": "organizer kuchenny",
+    },
+    "beauty_wellness": {
+        "label": "Beauty & Wellness",
+        "en": "neck massager",
+        "ua": "масажер для шиї",
+        "pl": "masazer karku",
+    },
+    "auto_car": {
+        "label": "Auto & Car",
+        "en": "mini car vacuum",
+        "ua": "автопилосос",
+        "pl": "odkurzacz samochodowy",
+    },
+    "pet_care": {
+        "label": "Pet Care",
+        "en": "steam pet brush",
+        "ua": "щітка для тварин",
+        "pl": "szczotka dla psa",
+    },
+    "smart_gadgets": {
+        "label": "Smart Gadgets",
+        "en": "mini thermal printer",
+        "ua": "міні принтер",
+        "pl": "mini drukarka",
+    },
+    "fitness_posture": {
+        "label": "Fitness & Posture",
+        "en": "posture corrector",
+        "ua": "коректор постави",
+        "pl": "korektor postawy",
+    },
+}
+
+
 class AdRecord(BaseModel):
-    """Normalized active ad record extracted from an ad spy source."""
+    """Normalized active ad or discovered live product record."""
 
     ad_id: str
     page_name: str
@@ -75,6 +113,7 @@ class AdRecord(BaseModel):
     active_ad_sets: int = Field(default=1, ge=1)
     countries: list[str] = Field(default_factory=list)
     source: str = "meta"
+    is_live: bool = True
 
 
 class LandingPageData(BaseModel):
@@ -102,6 +141,8 @@ class SupplierOffer(BaseModel):
     moq: int = Field(default=1, ge=1)
     image_url: Optional[str] = None
     source: str = "1688"
+    sales_count_text: str = ""
+    is_live: bool = True
 
 
 class MarginResult(BaseModel):
@@ -192,7 +233,28 @@ class AnalyzedProductReport(BaseModel):
     marketplace_signals: list[MarketplaceSignal] = Field(default_factory=list)
     tg_offers: list[TelegramDropOffer] = Field(default_factory=list)
     economics: Optional[CoFounderEconomics] = None
+    source_diagnostics: dict[str, str] = Field(default_factory=dict)
+    category: str = ""
     analyzed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+def make_product_placeholder_svg(label: str) -> str:
+    """Return a clean inline SVG data URI for offline demo products."""
+    import urllib.parse
+
+    short = (label or "Product")[:22]
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">'
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+        '<stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#1e293b"/>'
+        '</linearGradient></defs>'
+        '<rect width="320" height="240" fill="url(#g)"/>'
+        '<rect x="20" y="20" width="280" height="200" rx="14" fill="none" stroke="#38bdf8" stroke-opacity="0.35"/>'
+        f'<text x="160" y="118" fill="#e2e8f0" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">{short}</text>'
+        '<text x="160" y="144" fill="#38bdf8" font-family="monospace" font-size="11" text-anchor="middle">DEMO ITEM</text>'
+        '</svg>'
+    )
+    return "data:image/svg+xml;utf8," + urllib.parse.quote(svg)
 
 
 def get_httpx_proxy(settings: Settings) -> Optional[str]:

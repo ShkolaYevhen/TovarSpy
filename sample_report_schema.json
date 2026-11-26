@@ -1,7 +1,7 @@
 {
   "$defs": {
     "AdRecord": {
-      "description": "Normalized active ad record extracted from an ad spy source.",
+      "description": "Normalized active ad or discovered live product record.",
       "properties": {
         "ad_id": {
           "title": "Ad Id",
@@ -49,6 +49,11 @@
           "default": "meta",
           "title": "Source",
           "type": "string"
+        },
+        "is_live": {
+          "default": true,
+          "title": "Is Live",
+          "type": "boolean"
         }
       },
       "required": [
@@ -440,6 +445,16 @@
           "default": "1688",
           "title": "Source",
           "type": "string"
+        },
+        "sales_count_text": {
+          "default": "",
+          "title": "Sales Count Text",
+          "type": "string"
+        },
+        "is_live": {
+          "default": true,
+          "title": "Is Live",
+          "type": "boolean"
         }
       },
       "required": [
@@ -569,6 +584,18 @@
         }
       ],
       "default": null
+    },
+    "source_diagnostics": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Source Diagnostics",
+      "type": "object"
+    },
+    "category": {
+      "default": "",
+      "title": "Category",
+      "type": "string"
     },
     "analyzed_at": {
       "format": "date-time",

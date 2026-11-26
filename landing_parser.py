@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
-from config import LandingPageData
+from config import LandingPageData, make_product_placeholder_svg
 
 logger = logging.getLogger(__name__)
 
@@ -276,28 +276,28 @@ _MOCK_LANDINGS: dict[str, dict[str, Any]] = {
         "title": "EMS Smart Neck Massager Pro",
         "price": 149.0,
         "currency": "PLN",
-        "image_url": "https://cdn.example.com/products/ems-neck-massager.jpg",
+        "image_url": make_product_placeholder_svg("EMS Neck Massager"),
         "platform": "Shopify",
     },
     "homeglow.com.ua": {
         "title": "Sunset Projection LED Lamp 16 Colors",
         "price": 1190.0,
         "currency": "UAH",
-        "image_url": "https://cdn.example.com/products/sunset-lamp.jpg",
+        "image_url": make_product_placeholder_svg("Sunset LED Lamp"),
         "platform": "Cartum/Horoshop",
     },
     "autocleanpro.com": {
         "title": "Wireless Mini Car Vacuum 12000Pa",
         "price": 34.99,
         "currency": "USD",
-        "image_url": "https://cdn.example.com/products/car-vacuum.jpg",
+        "image_url": make_product_placeholder_svg("Mini Car Vacuum"),
         "platform": "Shopify",
     },
     "posturefit.tilda.ws": {
         "title": "Magnetic Smart Posture Corrector",
         "price": 89.0,
         "currency": "PLN",
-        "image_url": "https://cdn.example.com/products/posture-corrector.jpg",
+        "image_url": make_product_placeholder_svg("Posture Corrector"),
         "platform": "Tilda",
     },
 }
@@ -314,7 +314,7 @@ def _mock_landing_for_url(url: str) -> LandingPageData:
         title="Trending E-Commerce Gadget",
         price=29.99,
         currency="USD",
-        image_url="https://cdn.example.com/products/default-gadget.jpg",
+        image_url=make_product_placeholder_svg("Trending Gadget"),
         platform="Custom PHP",
     )
 

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import xml.etree.ElementTree as ET
 from typing import Any, Optional
 from urllib.parse import quote_plus, urljoin
 
@@ -15,6 +16,7 @@ from config import (
     SupplierOffer,
     TelegramDropOffer,
     get_httpx_proxy,
+    make_product_placeholder_svg,
 )
 from storage import get_cache, list_tg_channels, seed_default_channels, set_cache
 
@@ -158,40 +160,40 @@ def _mock_tg_offers(query: str) -> list[TelegramDropOffer]:
     uah_rate = DEFAULT_FX_RATES_TO_USD.get("UAH", 0.024)
     pool = [
         TelegramDropOffer(
-            channel="drop_ua",
-            post_url="https://t.me/drop_ua/4102",
+            channel="demo_ua_drop",
+            post_url="https://t.me/s/telegram",
             title="EMS Масажер для шиї Smart Neck Pro",
-            image_url="https://cdn.example.com/products/ems-neck-massager.jpg",
+            image_url=make_product_placeholder_svg("EMS Neck Massager"),
             drop_price_uah=340.0,
             rrc_price_uah=990.0,
             drop_price_usd=round(340.0 * uah_rate, 2),
             rrc_price_usd=round(990.0 * uah_rate, 2),
             in_stock=True,
-            supplier_contact="@drop_ua_manager",
+            supplier_contact="Demo Channel",
         ),
         TelegramDropOffer(
-            channel="opt_drop_ua",
-            post_url="https://t.me/opt_drop_ua/8831",
+            channel="demo_ua_drop",
+            post_url="https://t.me/s/telegram",
             title="Проекційна LED лампа Sunset Lamp 16 кольорів",
-            image_url="https://cdn.example.com/products/sunset-lamp.jpg",
+            image_url=make_product_placeholder_svg("Sunset LED Lamp"),
             drop_price_uah=260.0,
             rrc_price_uah=890.0,
             drop_price_usd=round(260.0 * uah_rate, 2),
             rrc_price_usd=round(890.0 * uah_rate, 2),
             in_stock=True,
-            supplier_contact="@opt_drop_support",
+            supplier_contact="Demo Channel",
         ),
         TelegramDropOffer(
-            channel="tovarka_ua_opt",
-            post_url="https://t.me/tovarka_ua_opt/5120",
+            channel="demo_ua_drop",
+            post_url="https://t.me/s/telegram",
             title="Міні автопилосос бездротовий 12000Pa",
-            image_url="https://cdn.example.com/products/car-vacuum.jpg",
+            image_url=make_product_placeholder_svg("Mini Car Vacuum"),
             drop_price_uah=410.0,
             rrc_price_uah=1190.0,
             drop_price_usd=round(410.0 * uah_rate, 2),
             rrc_price_usd=round(1190.0 * uah_rate, 2),
             in_stock=True,
-            supplier_contact="https://t.me/tovarka_ua_opt",
+            supplier_contact="Demo Channel",
         ),
     ]
     matched = [o for o in pool if _matches_query(o.title, query)]
@@ -215,6 +217,9 @@ async def search_telegram_dropshipping(
         target_channels = [c["handle"] for c in active] or list(settings.DEFAULT_TG_CHANNELS)
     else:
         target_channels = channels
+
+    if not target_channels:
+        return []
 
     async def _fetch_channel(http_client: httpx.AsyncClient, handle: str) -> list[TelegramDropOffer]:
         cache_key = f"tg_chan:{handle.lower()}"
@@ -319,46 +324,95 @@ def parse_alibaba_html(html: str, query: str) -> list[SupplierOffer]:
     return offers[:5]
 
 
+def _extract_aliexpress_content_items(html: str) -> list[dict[str, Any]]:
+    """Decode live AliExpress _init_data_ itemList.content array or legacy itemList array."""
+    dec = json.JSONDecoder()
+    # Live shape: "itemList":{"content":[{...},...]}
+    m_obj = re.search(r'"itemList"\s*:\s*(\{)', html)
+    if m_obj:
+        try:
+            obj, _ = dec.raw_decode(html[m_obj.start(1):])
+            if isinstance(obj, dict) and isinstance(obj.get("content"), list):
+                return [x for x in obj["content"] if isinstance(x, dict)]
+        except json.JSONDecodeError:
+            pass
+
+    # Legacy shape: "itemList":[{...},...]
+    m_arr = re.search(r'"itemList"\s*:\s*(\[)', html)
+    if m_arr:
+        try:
+            arr, _ = dec.raw_decode(html[m_arr.start(1):])
+            if isinstance(arr, list):
+                return [x for x in arr if isinstance(x, dict)]
+        except json.JSONDecodeError:
+            pass
+    return []
+
+
 def parse_aliexpress_html(html: str, query: str) -> list[SupplierOffer]:
-    """Parse public AliExpress search HTML or embedded JSON into SupplierOffer records."""
+    """Parse public AliExpress search HTML or embedded _init_data_ JSON into SupplierOffer records."""
     if not html or _is_blocked(html):
         return []
 
     rmb_rate = DEFAULT_FX_RATES_TO_USD.get("RMB", 0.14)
     offers: list[SupplierOffer] = []
 
-    # 1. Try embedded JSON itemList / _dida_config_
-    for script_match in re.findall(r'"itemList"\s*:\s*(\[\{.*?\}\])', html, re.S):
-        try:
-            items = json.loads(script_match)
-        except json.JSONDecodeError:
+    for item in _extract_aliexpress_content_items(html)[:20]:
+        prices_block = item.get("prices") if isinstance(item.get("prices"), dict) else {}
+        sale_price = prices_block.get("salePrice") if isinstance(prices_block.get("salePrice"), dict) else {}
+        raw_price = sale_price.get("minPrice") or item.get("price") or item.get("salePrice") or item.get("minPrice")
+        price_val = _to_float(str(raw_price)) if raw_price is not None else None
+        if not price_val:
             continue
-        for item in items[:5]:
-            if not isinstance(item, dict):
-                continue
-            price_val = item.get("price") or item.get("salePrice") or item.get("minPrice")
-            usd = _to_float(str(price_val)) if price_val is not None else None
-            if not usd:
-                continue
-            item_id = item.get("productId") or item.get("id") or "0"
-            href = str(item.get("productUrl") or f"https://www.aliexpress.com/item/{item_id}.html")
-            if href.startswith("//"):
-                href = "https:" + href
-            offers.append(
-                SupplierOffer(
-                    supplier_name=str(item.get("storeName") or "AliExpress Seller"),
-                    product_title=str(item.get("title") or query)[:140],
-                    product_url=href,
-                    wholesale_price_rmb=round(usd / rmb_rate, 2),
-                    wholesale_price_usd=round(usd, 2),
-                    moq=1,
-                    image_url=item.get("imageUrl"),
-                    source="aliexpress",
-                )
+
+        currency_code = str(sale_price.get("currencyCode") or "USD").upper()
+        fx = DEFAULT_FX_RATES_TO_USD.get(currency_code, 1.0)
+        usd = round(price_val * fx, 2)
+
+        title_obj = item.get("title")
+        if isinstance(title_obj, dict):
+            title = str(title_obj.get("displayTitle") or title_obj.get("seoTitle") or query)
+        else:
+            title = str(title_obj or query)
+
+        img_obj = item.get("image")
+        img_url = img_obj.get("imgUrl") if isinstance(img_obj, dict) else item.get("imageUrl")
+        if isinstance(img_url, str) and img_url.startswith("//"):
+            img_url = "https:" + img_url
+
+        trade_obj = item.get("trade") if isinstance(item.get("trade"), dict) else {}
+        sales_text = str(trade_obj.get("tradeDesc") or "")
+        eval_obj = item.get("evaluation") if isinstance(item.get("evaluation"), dict) else {}
+        star_rating = _to_float(str(eval_obj.get("starRating"))) if eval_obj.get("starRating") is not None else None
+        if star_rating is not None:
+            star_rating = max(0.0, min(5.0, star_rating))
+
+        store_obj = item.get("store") if isinstance(item.get("store"), dict) else {}
+        store_name = str(store_obj.get("storeName") or item.get("storeName") or "AliExpress Choice")
+
+        item_id = item.get("productId") or item.get("id") or "0"
+        href = str(item.get("productUrl") or f"https://www.aliexpress.com/item/{item_id}.html")
+        if href.startswith("//"):
+            href = "https:" + href
+
+        offers.append(
+            SupplierOffer(
+                supplier_name=store_name[:100],
+                product_title=title[:140],
+                product_url=href,
+                wholesale_price_rmb=round(usd / rmb_rate, 2),
+                wholesale_price_usd=usd,
+                rating=star_rating,
+                moq=1,
+                image_url=img_url if isinstance(img_url, str) else None,
+                source="aliexpress",
+                sales_count_text=sales_text,
+                is_live=True,
             )
-        if offers:
-            offers.sort(key=lambda o: o.wholesale_price_usd)
-            return offers[:5]
+        )
+    if offers:
+        offers.sort(key=lambda o: o.wholesale_price_usd)
+        return offers[:10]
 
     # 2. Fallback HTML card parsing
     soup = BeautifulSoup(html, "html.parser")
@@ -382,10 +436,111 @@ def parse_aliexpress_html(html: str, query: str) -> list[SupplierOffer]:
                 wholesale_price_usd=round(usd, 2),
                 moq=1,
                 source="aliexpress",
+                is_live=True,
             )
         )
     offers.sort(key=lambda o: o.wholesale_price_usd)
-    return offers[:5]
+    return offers[:10]
+
+
+async def fetch_aliexpress_live(
+    query: str,
+    settings: Settings,
+    limit: int = 8,
+    client: Optional[httpx.AsyncClient] = None,
+) -> list[SupplierOffer]:
+    """Fetch live AliExpress search items with SQLite caching."""
+    clean_q = (query or "trending gadget").strip()
+    cache_key = f"ae_live:{clean_q.lower()}"
+    cached = get_cache(settings.DB_PATH, cache_key, settings.CACHE_TTL_SECONDS)
+    if isinstance(cached, list) and cached:
+        return [SupplierOffer.model_validate(c) for c in cached][:limit]
+
+    slug = quote_plus(clean_q).replace("+", "-")
+    url = f"https://www.aliexpress.com/w/wholesale-{slug}.html"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    async def _run(http_client: httpx.AsyncClient) -> list[SupplierOffer]:
+        try:
+            resp = await http_client.get(url, headers=headers)
+            if resp.status_code != 200:
+                return []
+            return parse_aliexpress_html(resp.text, clean_q)
+        except httpx.HTTPError as exc:
+            logger.warning("AliExpress live fetch failed (%s): %s", clean_q, exc)
+            return []
+
+    if client is not None:
+        offers = await _run(client)
+    else:
+        proxy = get_httpx_proxy(settings)
+        async with httpx.AsyncClient(timeout=15.0, proxy=proxy, follow_redirects=True) as owned:
+            offers = await _run(owned)
+
+    if offers:
+        set_cache(settings.DB_PATH, cache_key, [o.model_dump(mode="json") for o in offers])
+    return offers[:limit]
+
+
+def parse_google_trends_rss(xml_text: str, geo: str = "UA") -> list[dict[str, str]]:
+    """Parse Google Trends daily RSS XML into trending topic dicts."""
+    if not xml_text or "<rss" not in xml_text.lower():
+        return []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    items: list[dict[str, str]] = []
+    for item in root.findall("./channel/item"):
+        title = (item.findtext("title") or "").strip()
+        if not title:
+            continue
+        traffic = ""
+        for child in item:
+            if child.tag.endswith("approx_traffic") and child.text:
+                traffic = child.text.strip()
+                break
+        items.append({"title": title, "traffic": traffic, "geo": geo.upper()})
+    return items[:15]
+
+
+async def fetch_google_trends_rss(
+    geo: str = "UA",
+    settings: Optional[Settings] = None,
+    client: Optional[httpx.AsyncClient] = None,
+) -> list[dict[str, str]]:
+    """Fetch public Google Trends RSS feed for a country code."""
+    active_settings = settings or Settings()
+    cache_key = f"gtrends:{geo.upper()}"
+    cached = get_cache(active_settings.DB_PATH, cache_key, active_settings.CACHE_TTL_SECONDS)
+    if isinstance(cached, list) and cached:
+        return cached
+
+    url = f"https://trends.google.com/trending/rss?geo={geo.upper()}"
+
+    async def _run(http_client: httpx.AsyncClient) -> list[dict[str, str]]:
+        try:
+            resp = await http_client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code != 200:
+                return []
+            return parse_google_trends_rss(resp.text, geo=geo)
+        except httpx.HTTPError as exc:
+            logger.warning("Google Trends RSS failed (%s): %s", geo, exc)
+            return []
+
+    if client is not None:
+        trends = await _run(client)
+    else:
+        proxy = get_httpx_proxy(active_settings)
+        async with httpx.AsyncClient(timeout=12.0, proxy=proxy, follow_redirects=True) as owned:
+            trends = await _run(owned)
+
+    if trends:
+        set_cache(active_settings.DB_PATH, cache_key, trends)
+    return trends
 
 
 async def _fetch_public_china_offers(
@@ -465,6 +620,7 @@ async def find_zero_cost_suppliers(
                 wholesale_price_usd=est_usd,
                 moq=5,
                 source="heuristic_estimate",
+                is_live=False,
             )
         ]
 
