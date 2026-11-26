@@ -6,7 +6,7 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from config import AdRecord, LandingPageData, Settings, SupplierOffer
+from config import AdRecord, LandingPageData, MarketplaceIntelReport, Settings, SupplierOffer
 from main import create_web_server, main, run_pipeline
 
 
@@ -23,7 +23,7 @@ class TestMainPipeline(unittest.IsolatedAsyncioTestCase):
                 output_dir=tmp_dir,
                 mock=True,
                 send_alerts=True,
-                settings=Settings(_env_file=None),
+                settings=Settings(_env_file=None, DB_PATH=str(Path(tmp_dir) / "test.db")),
             )
             self.assertGreaterEqual(len(reports), 2)
             self.assertTrue(any(r.margin.is_winner for r in reports))
@@ -74,6 +74,21 @@ class TestMainPipeline(unittest.IsolatedAsyncioTestCase):
             patch("main.collect_winning_ads", new=AsyncMock(return_value=[fake_ad])),
             patch("main.parse_landings", new=AsyncMock(return_value=[fake_landing])),
             patch("main.match_1688_suppliers", new=AsyncMock(return_value=[fake_supplier])),
+            patch(
+                "main.find_zero_cost_suppliers",
+                new=AsyncMock(
+                    return_value={
+                        "china_offers": [fake_supplier],
+                        "ua_drop_offers": [],
+                        "best_china_offer": fake_supplier,
+                        "best_ua_drop_offer": None,
+                    }
+                ),
+            ),
+            patch(
+                "main.analyze_marketplace_intel",
+                new=AsyncMock(return_value=MarketplaceIntelReport(query="Live Test Gadget")),
+            ),
             patch("main.send_telegram_alert", new=AsyncMock(return_value=True)) as mock_alert,
         ):
             reports, _ = await run_pipeline(
@@ -81,7 +96,7 @@ class TestMainPipeline(unittest.IsolatedAsyncioTestCase):
                 output_dir=tmp_dir,
                 mock=False,
                 send_alerts=True,
-                settings=Settings(_env_file=None),
+                settings=Settings(_env_file=None, DB_PATH=str(Path(tmp_dir) / "test.db")),
             )
 
         self.assertEqual(len(reports), 1)

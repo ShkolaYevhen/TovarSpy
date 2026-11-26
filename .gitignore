@@ -9,6 +9,9 @@ __pycache__/
 exports/
 output/
 reports*/
+data/
+*.db
+*.sqlite*
 PLAN.md
 CURRENT_TASK.md
 .pytest_cache/

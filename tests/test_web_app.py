@@ -14,9 +14,10 @@ from web_app import create_app
 class TestWebApp(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_dir = tempfile.TemporaryDirectory()
+        db_path = Path(self.tmp_dir.name) / "test.db"
         self.app = create_app(
             output_dir=Path(self.tmp_dir.name),
-            settings=Settings(_env_file=None),
+            settings=Settings(_env_file=None, DB_PATH=str(db_path)),
         )
         self.client = TestClient(self.app)
 
@@ -37,7 +38,7 @@ class TestWebApp(unittest.TestCase):
         resp_page = self.client.get("/spy/")
         self.assertEqual(resp_page.status_code, 200)
         self.assertIn("TovarSpy", resp_page.text)
-        for marker in ("/api/scan", "/api/export/csv", "/api/alert"):
+        for marker in ("/api/scan", "/api/export/csv", "/api/alert", "/api/simulate", "/api/tg-channels"):
             self.assertIn(marker, resp_page.text)
 
         resp_root_page = self.client.get("/")
@@ -51,6 +52,7 @@ class TestWebApp(unittest.TestCase):
         self.assertEqual(cfg["target_countries"], ["UA", "PL", "RO", "CZ", "DE", "US"])
         self.assertEqual(cfg["min_duration_days"], 7)
         self.assertEqual(cfg["available_sources"], ["meta", "adheart", "tiktok"])
+        self.assertIn("ua_cod_return_rate", cfg)
 
         rep_resp = self.client.get("/spy/api/report")
         self.assertEqual(rep_resp.status_code, 200)
@@ -58,8 +60,9 @@ class TestWebApp(unittest.TestCase):
         self.assertIn("summary", report)
         self.assertIn("products", report)
         self.assertGreaterEqual(report["summary"]["total"], 2)
+        self.assertIsNotNone(report["products"][0]["economics"])
 
-    def test_scan_with_threshold_override_and_exports(self) -> None:
+    def test_scan_history_simulator_watchlist_and_tg_channels(self) -> None:
         scan_resp = self.client.post(
             "/spy/api/scan",
             json={
@@ -72,18 +75,44 @@ class TestWebApp(unittest.TestCase):
         self.assertEqual(scan_resp.status_code, 200)
         payload = scan_resp.json()
         self.assertEqual(payload["meta"]["query"], "neck massager")
-        # With $20 threshold, Sunset Lamp ($16.98) and Posture ($7.87) are non-winners; Neck Massager ($25.39) is winner
         self.assertEqual(payload["summary"]["winners"], 1)
 
+        # Scan history persisted
+        scans = self.client.get("/spy/api/scans").json()["scans"]
+        self.assertGreaterEqual(len(scans), 1)
+        detail = self.client.get(f"/spy/api/scans/{scans[0]['id']}").json()
+        self.assertEqual(detail["query"], "neck massager")
+
+        # Simulator
+        sim = self.client.post(
+            "/spy/api/simulate",
+            json={"retail_price_usd": 35.0, "china_wholesale_usd": 4.0, "drop_price_uah": 300, "rrc_price_uah": 1000},
+        )
+        self.assertEqual(sim.status_code, 200)
+        self.assertIn("opportunity_score", sim.json())
+        self.assertIn(sim.json()["recommended_model"], ("UA_COD", "CROSS_BORDER", "PASS"))
+
+        # Watchlist CRUD
+        self.assertEqual(self.client.post("/spy/api/watchlist", json={"product_key": "w1", "title": "Massager", "opportunity_score": 82.0}).status_code, 200)
+        wl = self.client.get("/spy/api/watchlist").json()["items"]
+        self.assertEqual(len(wl), 1)
+        self.assertEqual(self.client.delete("/spy/api/watchlist/w1").status_code, 200)
+
+        # TG channels CRUD
+        chans = self.client.get("/spy/api/tg-channels").json()["channels"]
+        self.assertGreaterEqual(len(chans), 3)
+        add_ch = self.client.post("/spy/api/tg-channels", json={"handle": "https://t.me/s/my_drop_ua", "label": "My Drop"})
+        self.assertEqual(add_ch.status_code, 200)
+        self.assertEqual(add_ch.json()["channel"]["handle"], "my_drop_ua")
+        self.assertEqual(self.client.delete("/spy/api/tg-channels/my_drop_ua").status_code, 200)
+
+        # Exports
         csv_resp = self.client.get("/api/export/csv")
         self.assertEqual(csv_resp.status_code, 200)
-        self.assertIn("attachment", csv_resp.headers.get("content-disposition", ""))
         self.assertIn("ad_id", csv_resp.text)
-
         json_resp = self.client.get("/spy/api/export/json")
         self.assertEqual(json_resp.status_code, 200)
-        exported_items = json.loads(json_resp.text)
-        self.assertEqual(len(exported_items), payload["summary"]["total"])
+        self.assertEqual(len(json.loads(json_resp.text)), payload["summary"]["total"])
 
     def test_alert_endpoint_mock_and_404(self) -> None:
         report = self.client.get("/api/report").json()

@@ -11,8 +11,11 @@ from ad_collector import collect_winning_ads
 from china_matcher import match_1688_suppliers
 from config import AnalyzedProductReport, MarginResult, Settings, get_settings
 from landing_parser import parse_landings
-from margin_calculator import calculate_profitability
+from margin_calculator import calculate_cofounder_economics, calculate_profitability
+from marketplace_intel import analyze_marketplace_intel
 from notifier import export_reports, send_telegram_alert
+from sourcing_engine import find_zero_cost_suppliers
+from storage import save_scan
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +26,11 @@ async def run_pipeline(
     sources: Optional[list[str]] = None,
     output_dir: str | Path = "reports",
     mock: bool = False,
-    send_alerts: bool = True,
+    send_alerts: bool = False,
     settings: Optional[Settings] = None,
+    include_marketplace: bool = True,
 ) -> tuple[list[AnalyzedProductReport], dict[str, str]]:
-    """Run the end-to-end ad spy, landing parser, 1688 matcher, margin, and export pipeline."""
+    """Run ad discovery, landing parsing, zero-cost sourcing, marketplace intel, economics, and export."""
     active_settings = settings or get_settings()
     ads = await collect_winning_ads(
         active_settings,
@@ -41,7 +45,25 @@ async def run_pipeline(
     for ad, landing in zip(ads, landings):
         try:
             image_url = landing.image_url or ad.ad_creative_image_url or ""
-            suppliers = await match_1688_suppliers(image_url, active_settings, mock=mock)
+            product_title = landing.title or query or ad.page_name
+
+            suppliers_1688 = await match_1688_suppliers(image_url, active_settings, mock=mock)
+            zero_res = await find_zero_cost_suppliers(
+                product_title,
+                image_url,
+                active_settings,
+                mock=mock,
+            )
+
+            seen_urls = {s.product_url for s in suppliers_1688}
+            suppliers = list(suppliers_1688)
+            for extra in zero_res.get("china_offers", []):
+                if extra.product_url not in seen_urls:
+                    suppliers.append(extra)
+                    seen_urls.add(extra.product_url)
+            suppliers.sort(key=lambda o: o.wholesale_price_usd)
+            suppliers = suppliers[:5]
+
             best_supplier = suppliers[0] if suppliers else None
             wholesale_usd = best_supplier.wholesale_price_usd if best_supplier else 0.0
 
@@ -64,12 +86,36 @@ async def run_pipeline(
                     is_winner=False,
                 )
 
+            mkt_signals = []
+            if include_marketplace:
+                mkt_report = await analyze_marketplace_intel(
+                    product_title,
+                    active_settings,
+                    mock=mock,
+                )
+                mkt_signals = mkt_report.signals
+
+            ua_offers = zero_res.get("ua_drop_offers", [])
+            best_tg = zero_res.get("best_ua_drop_offer")
+            economics = calculate_cofounder_economics(
+                retail_price_usd=margin.retail_price_usd,
+                china_wholesale_usd=wholesale_usd,
+                settings=active_settings,
+                ad_days_running=ad.days_running,
+                ad_active_sets=ad.active_ad_sets,
+                marketplace_signals=mkt_signals,
+                best_tg_offer=best_tg,
+            )
+
             report = AnalyzedProductReport(
                 ad=ad,
                 landing=landing,
                 suppliers=suppliers,
                 best_supplier=best_supplier,
                 margin=margin,
+                marketplace_signals=mkt_signals,
+                tg_offers=ua_offers,
+                economics=economics,
             )
             if send_alerts and report.margin.is_winner:
                 await send_telegram_alert(report, active_settings, mock=mock)
@@ -77,7 +123,25 @@ async def run_pipeline(
         except Exception as exc:
             logger.warning("Skipping ad %s due to pipeline error: %s", ad.ad_id, exc)
 
+    reports.sort(
+        key=lambda r: (r.economics.opportunity_score if r.economics else 0.0, r.margin.net_margin_usd),
+        reverse=True,
+    )
     exported = export_reports(reports, output_dir=output_dir)
+
+    try:
+        save_scan(
+            active_settings.DB_PATH,
+            query=query,
+            countries=countries or list(active_settings.TARGET_COUNTRIES),
+            sources=sources or ["meta", "adheart", "tiktok"],
+            total_count=len(reports),
+            winners_count=sum(1 for r in reports if r.margin.is_winner),
+            reports=[r.model_dump(mode="json") for r in reports],
+        )
+    except Exception as exc:
+        logger.warning("Could not persist scan history to SQLite: %s", exc)
+
     return reports, exported
 
 
