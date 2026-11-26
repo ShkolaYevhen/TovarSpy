@@ -29,7 +29,7 @@ class TestWebApp(unittest.TestCase):
         self.assertEqual(resp_root.status_code, 200)
         data = resp_root.json()
         self.assertEqual(data["status"], "ok")
-        self.assertGreaterEqual(data["products_loaded"], 1)
+        self.assertEqual(data["products_loaded"], 0)
 
         resp_spy = self.client.get("/spy/api/health")
         self.assertEqual(resp_spy.status_code, 200)
@@ -38,7 +38,7 @@ class TestWebApp(unittest.TestCase):
         resp_page = self.client.get("/spy/")
         self.assertEqual(resp_page.status_code, 200)
         self.assertIn("TovarSpy", resp_page.text)
-        for marker in ("/api/scan", "/api/export/csv", "/api/alert", "/api/simulate", "/api/tg-channels"):
+        for marker in ("/api/scan", "/api/super-parse", "/api/img", "/api/trends", "/api/export/csv", "/api/alert", "/api/simulate", "/api/tg-channels"):
             self.assertIn(marker, resp_page.text)
 
         resp_root_page = self.client.get("/")
@@ -51,7 +51,8 @@ class TestWebApp(unittest.TestCase):
         cfg = cfg_resp.json()
         self.assertEqual(cfg["target_countries"], ["UA", "PL", "RO", "CZ", "DE", "US"])
         self.assertEqual(cfg["min_duration_days"], 7)
-        self.assertEqual(cfg["available_sources"], ["meta", "adheart", "tiktok"])
+        self.assertIn("aliexpress", cfg["available_sources"])
+        self.assertIn("curated_categories", cfg)
         self.assertIn("ua_cod_return_rate", cfg)
 
         rep_resp = self.client.get("/spy/api/report")
@@ -59,8 +60,7 @@ class TestWebApp(unittest.TestCase):
         report = rep_resp.json()
         self.assertIn("summary", report)
         self.assertIn("products", report)
-        self.assertGreaterEqual(report["summary"]["total"], 2)
-        self.assertIsNotNone(report["products"][0]["economics"])
+        self.assertEqual(report["summary"]["total"], 0)
 
     def test_scan_history_simulator_watchlist_and_tg_channels(self) -> None:
         scan_resp = self.client.post(
@@ -115,7 +115,9 @@ class TestWebApp(unittest.TestCase):
         self.assertEqual(len(json.loads(json_resp.text)), payload["summary"]["total"])
 
     def test_alert_endpoint_mock_and_404(self) -> None:
-        report = self.client.get("/api/report").json()
+        scan_resp = self.client.post("/spy/api/scan", json={"query": "massager", "mock": True})
+        self.assertEqual(scan_resp.status_code, 200)
+        report = scan_resp.json()
         winner = next(p for p in report["products"] if p["margin"]["is_winner"])
 
         ok_resp = self.client.post("/spy/api/alert", json={"ad_id": winner["ad"]["ad_id"], "mock": True})

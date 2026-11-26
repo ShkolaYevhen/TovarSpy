@@ -3,29 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TovarSpy — Zero-Cost Dropshipping Co-Founder</title>
+  <title>TovarSpy — Live Product Discovery Super-Parser</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0b0f17;
-      --bg-elev: #111827;
-      --bg-card: #141c2b;
-      --bg-hover: #1a2436;
-      --border: #232f45;
-      --border-strong: #32425e;
-      --text: #eef2f7;
+      --bg: #080c14;
+      --bg-elev: #0f1623;
+      --bg-card: #131c2c;
+      --bg-hover: #192438;
+      --border: #212e45;
+      --border-strong: #324463;
+      --text: #f1f5f9;
       --text-muted: #94a3b8;
       --text-dim: #64748b;
       --accent: #38bdf8;
-      --accent-soft: rgba(56, 189, 248, 0.12);
+      --accent-soft: rgba(56, 189, 248, 0.14);
       --win: #10b981;
-      --win-soft: rgba(16, 185, 129, 0.14);
+      --win-soft: rgba(16, 185, 129, 0.16);
       --warn: #f59e0b;
-      --warn-soft: rgba(245, 158, 11, 0.14);
+      --warn-soft: rgba(245, 158, 11, 0.16);
       --loss: #f43f5e;
-      --loss-soft: rgba(244, 63, 94, 0.14);
+      --loss-soft: rgba(244, 63, 94, 0.16);
       --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
       --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
@@ -33,7 +33,7 @@
     * { box-sizing: border-box; }
     html, body {
       margin: 0; padding: 0; background: var(--bg); color: var(--text);
-      font-family: var(--sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+      font-family: var(--sans); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased;
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
@@ -43,24 +43,25 @@
     .text-warn { color: var(--warn); }
     .text-accent { color: var(--accent); }
 
+    /* Top Bar */
     .topbar {
       position: sticky; top: 0; z-index: 30;
       display: flex; align-items: center; justify-content: space-between; gap: 16px;
-      padding: 12px 24px; background: rgba(11, 15, 23, 0.9); backdrop-filter: blur(12px);
+      padding: 12px 24px; background: rgba(8, 12, 20, 0.92); backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
     }
     .brand { display: flex; align-items: center; gap: 12px; }
     .brand-mark {
-      width: 34px; height: 34px; border-radius: 9px;
+      width: 36px; height: 36px; border-radius: 10px;
       background: linear-gradient(135deg, #0ea5e9, #10b981);
-      display: grid; place-items: center; font-weight: 700; font-size: 15px; color: #06101b;
+      display: grid; place-items: center; font-weight: 800; font-size: 15px; color: #04101d;
     }
-    .brand-title { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
+    .brand-title { font-weight: 800; font-size: 16px; letter-spacing: -0.02em; }
     .brand-sub { font-size: 12px; color: var(--text-muted); }
     .topbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
     .status-pill {
-      display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+      display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
       border-radius: 999px; border: 1px solid var(--border); background: var(--bg-elev);
       color: var(--text-muted); font-size: 12px;
     }
@@ -69,21 +70,24 @@
 
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-      padding: 7px 13px; border-radius: 8px; border: 1px solid var(--border-strong);
+      padding: 8px 13px; border-radius: 8px; border: 1px solid var(--border-strong);
       background: var(--bg-elev); color: var(--text); font-family: var(--sans);
-      font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; white-space: nowrap;
     }
     .btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); text-decoration: none; }
     .btn:disabled { opacity: 0.55; cursor: not-allowed; }
-    .btn-primary { background: #0ea5e9; border-color: #38bdf8; color: #06101b; font-weight: 600; }
-    .btn-primary:hover:not(:disabled) { background: #38bdf8; border-color: #7dd3fc; }
-    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+    .btn-primary { background: linear-gradient(135deg, #0ea5e9, #0284c7); border-color: #38bdf8; color: #04101d; font-weight: 700; }
+    .btn-primary:hover:not(:disabled) { background: #38bdf8; }
+    .btn-emerald { background: linear-gradient(135deg, #10b981, #059669); border-color: #34d399; color: #03150e; font-weight: 700; }
+    .btn-emerald:hover:not(:disabled) { background: #34d399; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 7px; }
     .btn-win { background: var(--win-soft); border-color: rgba(16, 185, 129, 0.35); color: #34d399; }
     .btn-loss { background: var(--loss-soft); border-color: rgba(244, 63, 94, 0.3); color: #fb7185; }
+    .btn.active-view { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
-    .container { max-width: 1440px; margin: 0 auto; padding: 20px 24px 56px; display: flex; flex-direction: column; gap: 18px; }
+    .container { max-width: 1460px; margin: 0 auto; padding: 18px 24px 60px; display: flex; flex-direction: column; gap: 16px; }
 
-    /* Nav Tabs */
+    /* Tabs */
     .tabs-bar { display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
     .tab-btn {
       padding: 8px 14px; border-radius: 8px; border: 1px solid transparent;
@@ -91,41 +95,43 @@
     }
     .tab-btn:hover { color: var(--text); background: var(--bg-elev); }
     .tab-btn.active { background: var(--accent-soft); border-color: rgba(56, 189, 248, 0.35); color: var(--accent); }
-    .tab-view { display: none; flex-direction: column; gap: 18px; }
+    .tab-view { display: none; flex-direction: column; gap: 16px; }
     .tab-view.active { display: flex; }
 
     /* KPI Strip */
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
     .kpi-card {
       background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 16px 18px; display: flex; flex-direction: column; gap: 6px;
+      padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;
     }
     .kpi-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-    .kpi-value { font-size: 25px; font-weight: 700; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .kpi-value { font-size: 24px; font-weight: 800; font-family: var(--mono); }
     .kpi-sub { font-size: 12px; color: var(--text-dim); }
 
     .panel {
       background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 18px; display: flex; flex-direction: column; gap: 14px;
+      padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
     }
     .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-    .panel-title { font-size: 14px; font-weight: 600; }
+    .panel-title { font-size: 14px; font-weight: 700; }
 
-    .runner-row { display: grid; grid-template-columns: minmax(220px, 1.5fr) minmax(180px, 1fr) auto; gap: 12px; align-items: center; }
+    .runner-row { display: grid; grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) auto auto; gap: 10px; align-items: center; }
     .input, .select {
       width: 100%; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px;
       color: var(--text); font-family: var(--sans); font-size: 13px; padding: 8px 12px; outline: none;
     }
     .input:focus, .select:focus { border-color: var(--accent); }
 
-    .chips-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .group-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+    .chips-group { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .group-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
     .chip {
-      padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border-strong);
-      background: var(--bg); color: var(--text-muted); font-size: 12px; font-weight: 500; cursor: pointer;
+      padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border-strong);
+      background: var(--bg); color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer;
     }
+    .chip:hover { border-color: var(--accent); color: var(--text); }
     .chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-    .toggle-wrap { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+    .chip.trend { background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.28); color: #6ee7b7; }
+    .toggle-wrap { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
     .toggle-wrap input { accent-color: var(--accent); }
 
     .thresholds-grid {
@@ -136,59 +142,140 @@
     .field label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
     .field input { font-family: var(--mono); font-size: 12px; padding: 6px 9px; }
 
+    /* Diagnostics Bar */
+    .diag-strip { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .diag-chip {
+      display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+      border-radius: 8px; font-size: 11px; font-family: var(--mono);
+      border: 1px solid var(--border); background: var(--bg);
+    }
+    .diag-chip.ok { border-color: rgba(16, 185, 129, 0.4); color: #34d399; }
+    .diag-chip.warn { border-color: rgba(245, 158, 11, 0.4); color: #fbbf24; }
+    .diag-chip.blk { border-color: rgba(244, 63, 94, 0.4); color: #fb7185; }
+
+    /* Visual Product Gallery */
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+      gap: 16px;
+    }
+    .product-card {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .product-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+    }
+    .card-media {
+      position: relative;
+      height: 215px;
+      background: #0a101d;
+      overflow: hidden;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-media img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .media-top-left {
+      position: absolute; top: 10px; left: 10px;
+      display: flex; gap: 5px; flex-wrap: wrap;
+    }
+    .media-top-right {
+      position: absolute; top: 10px; right: 10px;
+      display: flex; gap: 5px; align-items: center;
+    }
+    .media-bottom-left {
+      position: absolute; bottom: 10px; left: 10px;
+      display: flex; gap: 5px; flex-wrap: wrap;
+    }
+    .card-body {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+    }
+    .card-title {
+      font-size: 14px; font-weight: 700; color: var(--text);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      min-height: 40px; cursor: pointer;
+    }
+    .card-meta { font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between; gap: 8px; }
+    .profit-strip {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px;
+    }
+    .profit-box { display: flex; flex-direction: column; gap: 2px; }
+    .profit-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); font-weight: 600; }
+    .profit-val { font-family: var(--mono); font-size: 13px; font-weight: 700; }
+    .card-links {
+      display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: auto; padding-top: 6px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Table View */
     .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .toolbar-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
-    table { width: 100%; border-collapse: collapse; min-width: 1020px; }
+    table { width: 100%; border-collapse: collapse; min-width: 1000px; }
     th, td { padding: 11px 13px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
     th { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); background: var(--bg-elev); }
-    tbody tr { cursor: pointer; transition: background 0.12s; }
+    tbody tr { cursor: pointer; }
     tbody tr:hover { background: var(--bg-hover); }
-    tbody tr:last-child td { border-bottom: none; }
-
-    .prod-cell { display: flex; align-items: center; gap: 11px; max-width: 290px; }
-    .prod-thumb { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; background: var(--bg-elev); border: 1px solid var(--border); flex-shrink: 0; }
+    .prod-cell { display: flex; align-items: center; gap: 11px; max-width: 300px; }
+    .prod-thumb { width: 46px; height: 46px; border-radius: 8px; object-fit: cover; background: var(--bg-elev); border: 1px solid var(--border); flex-shrink: 0; }
     .prod-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; }
     .prod-sub { font-size: 11px; color: var(--text-muted); }
 
     .badge {
-      display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 6px;
-      font-size: 11px; font-weight: 600; border: 1px solid var(--border-strong);
-      background: var(--bg-elev); color: var(--text-muted); white-space: nowrap;
+      display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 6px;
+      font-size: 11px; font-weight: 700; border: 1px solid var(--border-strong);
+      background: rgba(15, 22, 35, 0.88); color: var(--text); white-space: nowrap;
+      backdrop-filter: blur(6px);
     }
-    .badge-win { background: var(--win-soft); border-color: rgba(16, 185, 129, 0.35); color: #34d399; }
-    .badge-warn { background: var(--warn-soft); border-color: rgba(245, 158, 11, 0.35); color: #fbbf24; }
-    .badge-loss { background: var(--loss-soft); border-color: rgba(244, 63, 94, 0.3); color: #fb7185; }
-    .badge-src { background: var(--accent-soft); border-color: rgba(56, 189, 248, 0.25); color: var(--accent); text-transform: uppercase; }
+    .badge-win { background: rgba(6, 78, 59, 0.88); border-color: rgba(16, 185, 129, 0.55); color: #34d399; }
+    .badge-warn { background: rgba(120, 53, 15, 0.88); border-color: rgba(245, 158, 11, 0.55); color: #fbbf24; }
+    .badge-loss { background: rgba(136, 19, 55, 0.88); border-color: rgba(244, 63, 94, 0.55); color: #fda4af; }
+    .badge-src { background: rgba(12, 74, 110, 0.88); border-color: rgba(56, 189, 248, 0.45); color: #7dd3fc; text-transform: uppercase; }
 
     .score-pill {
-      display: inline-flex; align-items: center; justify-content: center; min-width: 44px;
-      padding: 3px 8px; border-radius: 999px; font-family: var(--mono); font-weight: 700; font-size: 12px;
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 3px 9px; border-radius: 999px; font-family: var(--mono); font-weight: 800; font-size: 12px;
     }
 
-    /* Simulator & Split Grids */
     .split-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
     .mini-card {
       background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
       padding: 12px; display: flex; flex-direction: column; gap: 5px;
     }
 
-    /* Slide-over Drawer */
+    /* Drawer */
     .drawer-backdrop {
-      position: fixed; inset: 0; background: rgba(4, 7, 13, 0.72); backdrop-filter: blur(4px);
+      position: fixed; inset: 0; background: rgba(4, 7, 13, 0.75); backdrop-filter: blur(4px);
       z-index: 50; display: none; justify-content: flex-end;
     }
     .drawer-backdrop.open { display: flex; }
     .drawer {
-      width: min(620px, 100vw); height: 100%; background: var(--bg-elev);
+      width: min(630px, 100vw); height: 100%; background: var(--bg-elev);
       border-left: 1px solid var(--border-strong); overflow-y: auto; padding: 22px;
-      display: flex; flex-direction: column; gap: 16px; box-shadow: -12px 0 40px rgba(0, 0, 0, 0.55);
+      display: flex; flex-direction: column; gap: 16px;
     }
     .drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
     .drawer-hero { display: flex; gap: 14px; align-items: center; }
-    .drawer-img { width: 72px; height: 72px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border-strong); background: var(--bg); flex-shrink: 0; }
-    .section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px; }
+    .drawer-img { width: 84px; height: 84px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border-strong); background: var(--bg); flex-shrink: 0; }
+    .section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px; }
     .waterfall { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
     .wf-row { display: flex; justify-content: space-between; font-size: 13px; }
     .wf-row.total { border-top: 1px dashed var(--border-strong); padding-top: 8px; margin-top: 2px; font-weight: 700; font-size: 14px; }
@@ -197,11 +284,16 @@
     .supplier-card.best { border-color: rgba(16, 185, 129, 0.45); }
     .supplier-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 
+    .loading-box {
+      padding: 40px 20px; text-align: center; border: 1px dashed var(--border-strong);
+      border-radius: 12px; color: var(--text-muted); background: var(--bg);
+    }
+
     .toast {
       position: fixed; right: 20px; bottom: 20px; z-index: 80;
       background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: 10px;
       padding: 11px 16px; font-size: 13px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-      display: none; max-width: 380px;
+      display: none; max-width: 400px;
     }
     .toast.show { display: block; }
     .toast.ok { border-color: var(--win); }
@@ -223,14 +315,14 @@
     <div class="brand">
       <div class="brand-mark">TS</div>
       <div>
-        <div class="brand-title">TovarSpy Co-Founder</div>
-        <div class="brand-sub">Zero-API Ad Radar · Marketplaces · UA Telegram Drops · Unit Economics</div>
+        <div class="brand-title">TovarSpy Super-Parser</div>
+        <div class="brand-sub">Live AliExpress · Prom.ua · OLX.ua/pl · Google Trends · UA Telegram Drops</div>
       </div>
     </div>
     <div class="topbar-actions">
       <span class="status-pill" id="modeBadge">
-        <span class="status-dot mock" id="modeDot"></span>
-        <span id="modeText">Demo Mode</span>
+        <span class="status-dot" id="modeDot"></span>
+        <span id="modeText">Live Mode</span>
       </span>
       <span class="status-pill mono" id="updatedAt">Updated: —</span>
       <a class="btn btn-sm" id="exportCsvBtn" href="#">Export CSV</a>
@@ -240,24 +332,24 @@
 
   <main class="container">
     <nav class="tabs-bar">
-      <button class="tab-btn active" data-tab="radar" type="button">Opportunity Radar</button>
+      <button class="tab-btn active" data-tab="radar" type="button">Visual Product Radar</button>
       <button class="tab-btn" data-tab="simulator" type="button">Profit Simulator</button>
       <button class="tab-btn" data-tab="channels" type="button">UA Telegram Drops</button>
       <button class="tab-btn" data-tab="watchlist" type="button">Watchlist &amp; History</button>
     </nav>
 
-    <!-- TAB 1: OPPORTUNITY RADAR -->
+    <!-- TAB 1: VISUAL PRODUCT RADAR -->
     <section class="tab-view active" id="tab-radar">
       <section class="kpi-grid">
         <div class="kpi-card">
-          <div class="kpi-label">Total Analyzed</div>
+          <div class="kpi-label">Live Products Found</div>
           <div class="kpi-value" id="kpiTotal">0</div>
-          <div class="kpi-sub">Active winning ad &amp; trend candidates</div>
+          <div class="kpi-sub" id="kpiLiveSub">0 live items · 0 winners</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Winning Offers</div>
           <div class="kpi-value text-win" id="kpiWinners">0</div>
-          <div class="kpi-sub" id="kpiWinRate">0% pass threshold</div>
+          <div class="kpi-sub" id="kpiWinRate">0% pass winner threshold</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Avg / Peak Score</div>
@@ -265,38 +357,47 @@
           <div class="kpi-sub mono" id="kpiTopScore">Peak Opportunity: 0.0 / 100</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Avg / Peak Margin</div>
+          <div class="kpi-label">Peak / Avg Net Margin</div>
           <div class="kpi-value" id="kpiPeakMargin">$0.00</div>
           <div class="kpi-sub mono" id="kpiAvgMargin">Avg Net: $0.00</div>
         </div>
       </section>
 
+      <!-- Super-Parser Controls -->
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Zero-Cost Discovery Scanner (Public Web + Marketplaces + UA Drops)</div>
-          <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+          <div class="panel-title">Auto-Discovery Super-Parser (Real Photos, Real Prices, Real Links)</div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
             <label class="toggle-wrap">
-              <input type="checkbox" id="toggleMock" checked />
-              <span>Offline Demo Dataset</span>
-            </label>
-            <label class="toggle-wrap">
-              <input type="checkbox" id="toggleAutoAlert" />
-              <span>Auto-Telegram</span>
+              <input type="checkbox" id="toggleMock" />
+              <span>Offline Demo Mode</span>
             </label>
             <button class="btn btn-sm" type="button" id="toggleThresholdsBtn">Thresholds ▾</button>
+            <button class="btn btn-sm" type="button" id="toggleBlocksBtn">External Limits ▾</button>
           </div>
         </div>
 
         <div class="runner-row">
-          <input class="input" id="scanQuery" type="text" placeholder="Product keyword (e.g. neck massager, sunset lamp, car vacuum)..." />
+          <input class="input" id="scanQuery" type="text" placeholder="Search keyword (leave blank to auto-parse all 6 categories)..." />
           <input class="input mono" id="scanProxy" type="text" placeholder="Optional proxy (http://user:pass@ip:port)" />
-          <button class="btn btn-primary" id="runScanBtn" type="button">Run Intelligence Scan</button>
+          <button class="btn btn-primary" id="runScanBtn" type="button">Search Keyword</button>
+          <button class="btn btn-emerald" id="superParseBtn" type="button">⚡ Super Parse All Categories</button>
         </div>
 
-        <div style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;">
-          <div class="chips-group" id="countryChips"><span class="group-label">Countries:</span></div>
-          <div class="chips-group" id="sourceChips"><span class="group-label">Ad Sources:</span></div>
+        <div class="chips-group" id="categoryChips"><span class="group-label">Categories:</span></div>
+
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">
+          <div class="chips-group" id="trendsChips" style="flex:1;">
+            <span class="group-label">Google Trends:</span>
+          </div>
+          <select class="select" id="trendsGeo" style="width:110px;">
+            <option value="UA">Geo: UA</option>
+            <option value="PL">Geo: PL</option>
+            <option value="US">Geo: US</option>
+          </select>
         </div>
+
+        <div class="diag-strip" id="diagnosticsStrip"></div>
 
         <div class="thresholds-grid" id="thresholdsPanel" style="display:none;">
           <div class="field"><label for="thMinDays">Min Active Days</label><input class="input" id="thMinDays" type="number" min="0" step="1" /></div>
@@ -305,42 +406,58 @@
           <div class="field"><label for="thCpa">Cross-Border CPA ($)</label><input class="input" id="thCpa" type="number" min="0" step="0.5" /></div>
           <div class="field"><label for="thWinnerMin">Winner Net Margin ($)</label><input class="input" id="thWinnerMin" type="number" step="0.5" /></div>
         </div>
+
+        <div id="externalBlocksPanel" style="display:none;border-top:1px solid var(--border);padding-top:12px;">
+          <div class="section-label">External Source Limits &amp; Setup Notes</div>
+          <div class="card-grid" id="externalBlocksGrid"></div>
+        </div>
       </section>
 
+      <!-- Gallery & Table -->
       <section class="panel">
         <div class="toolbar">
           <div class="toolbar-left">
-            <input class="input" id="filterSearch" type="text" placeholder="Filter by product, brand, platform..." style="width:240px;" />
-            <select class="select" id="filterCountry" style="width:140px;"><option value="">All Countries</option></select>
+            <input class="input" id="filterSearch" type="text" placeholder="Filter products, sellers..." style="width:220px;" />
+            <select class="select" id="filterCategory" style="width:170px;"><option value="">All Categories</option></select>
+            <select class="select" id="filterSource" style="width:150px;">
+              <option value="">All Sources</option>
+              <option value="aliexpress">AliExpress</option>
+              <option value="prom_ua">Prom.ua</option>
+              <option value="olx_ua">OLX.ua</option>
+              <option value="olx_pl">OLX.pl</option>
+            </select>
             <label class="toggle-wrap"><input type="checkbox" id="filterWinnersOnly" /><span>Winners Only</span></label>
           </div>
           <div class="toolbar-left">
-            <span class="group-label">Sort:</span>
-            <select class="select" id="sortField" style="width:190px;">
-              <option value="score">Opportunity Score (0-100)</option>
-              <option value="margin">Cross-Border Margin ($)</option>
-              <option value="ua">UA COD Net Profit ($)</option>
-              <option value="days">Ad Longevity (Days)</option>
+            <select class="select" id="sortField" style="width:185px;">
+              <option value="score">Sort: Opportunity Score</option>
+              <option value="margin">Sort: Cross-Border Profit</option>
+              <option value="ua">Sort: UA COD Profit</option>
+              <option value="cogs">Sort: Lowest China COGS</option>
             </select>
+            <button class="btn btn-sm active-view" id="viewGalleryBtn" type="button">Gallery</button>
+            <button class="btn btn-sm" id="viewTableBtn" type="button">Table</button>
           </div>
         </div>
 
-        <div class="table-wrap">
+        <div id="galleryContainer" class="gallery-grid">
+          <div class="loading-box" style="grid-column:1/-1;">Initializing live discovery...</div>
+        </div>
+
+        <div id="tableContainer" class="table-wrap" style="display:none;">
           <table>
             <thead>
               <tr>
-                <th>Product / Advertiser</th>
+                <th>Product</th>
+                <th>Category &amp; Source</th>
                 <th>Score &amp; Verdict</th>
-                <th>Source &amp; Geo</th>
                 <th>UA COD Profit</th>
                 <th>Cross-Border Profit</th>
-                <th>China COGS</th>
-                <th>Actions</th>
+                <th>Wholesale / Retail</th>
+                <th>Links &amp; Actions</th>
               </tr>
             </thead>
-            <tbody id="offersBody">
-              <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px;">Loading offers...</td></tr>
-            </tbody>
+            <tbody id="offersBody"></tbody>
           </table>
         </div>
       </section>
@@ -371,7 +488,7 @@
             <div class="panel-title">Simulated Co-Founder Verdict</div>
             <span class="badge badge-win mono" id="simVerdict">—</span>
           </div>
-          <div class="waterfall" id="simResults">
+          <div class="waterfall">
             <div class="wf-row"><span>Model A: UA Local COD Net Profit</span><span class="mono" id="simUaProfit">$0.00</span></div>
             <div class="wf-row"><span>Model A: UA COD ROI %</span><span class="mono" id="simUaRoi">0%</span></div>
             <div class="wf-row"><span>Model A: Nova Poshta Return Drag</span><span class="mono text-loss" id="simReturnDrag">-$0.00</span></div>
@@ -387,12 +504,12 @@
     <section class="tab-view" id="tab-channels">
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Public Ukrainian Telegram Drop Channels (t.me/s/ — Zero Bot Token Required)</div>
+          <div class="panel-title">Public Ukrainian Telegram Drop Channels (t.me/s/ — Add Real Channels)</div>
         </div>
         <div class="runner-row" style="grid-template-columns:1fr 1fr auto auto;">
           <input class="input" id="tgHandleInput" type="text" placeholder="Channel handle or https://t.me/s/channel" />
           <input class="input" id="tgLabelInput" type="text" placeholder="Optional label (e.g. Odessa Opt Drop)" />
-          <label class="toggle-wrap"><input type="checkbox" id="tgTestScrape" /><span>Test Live Scrape</span></label>
+          <label class="toggle-wrap"><input type="checkbox" id="tgTestScrape" checked /><span>Test Live Scrape</span></label>
           <button class="btn btn-primary" id="addTgBtn" type="button">Add Channel</button>
         </div>
         <div class="card-grid" id="tgChannelsGrid"></div>
@@ -414,7 +531,7 @@
     </section>
   </main>
 
-  <!-- Slide-over Detail Drawer -->
+  <!-- Detail Drawer -->
   <div class="drawer-backdrop" id="drawerBackdrop">
     <aside class="drawer" aria-label="Offer Details">
       <div class="drawer-head">
@@ -423,8 +540,8 @@
           <div>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
               <span class="badge" id="drawerWinnerBadge"></span>
-              <span class="badge" id="drawerPlatform"></span>
-              <span class="badge badge-src" id="drawerModelBadge"></span>
+              <span class="badge badge-src" id="drawerPlatform"></span>
+              <span class="badge" id="drawerModelBadge"></span>
             </div>
             <div style="font-size:16px;font-weight:700;" id="drawerTitle"></div>
             <div class="prod-sub" id="drawerMeta"></div>
@@ -439,22 +556,21 @@
       </div>
 
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <a class="btn btn-sm" id="drawerLandingLink" target="_blank" rel="noopener">Landing Page ↗</a>
-        <a class="btn btn-sm" id="drawerAdLink" target="_blank" rel="noopener">Ad Creative ↗</a>
-        <button class="btn btn-sm btn-primary" id="drawerLoadSimBtn" type="button">Load in Simulator</button>
-        <button class="btn btn-sm" id="drawerWatchBtn" type="button">Save Watchlist</button>
-        <button class="btn btn-sm btn-win" id="drawerAlertBtn" type="button">Telegram Alert</button>
+        <a class="btn btn-sm btn-primary" id="drawerLandingLink" target="_blank" rel="noopener noreferrer">Open Listing ↗</a>
+        <button class="btn btn-sm" id="drawerLoadSimBtn" type="button">Load in Simulator</button>
+        <button class="btn btn-sm btn-win" id="drawerWatchBtn" type="button">★ Save Watchlist</button>
+        <button class="btn btn-sm" id="drawerAlertBtn" type="button">Telegram Alert</button>
       </div>
 
       <div>
-        <div class="section-label">Marketplace Demand &amp; Saturation Signals</div>
+        <div class="section-label">Marketplace Demand &amp; Price Benchmarks</div>
         <div class="card-grid" id="drawerMarkets"></div>
       </div>
 
       <div>
-        <div class="section-label">Zero-Cost Sourcing: UA Telegram Drops vs China Wholesale</div>
+        <div class="section-label">Matched Suppliers (AliExpress / 1688 / UA Telegram)</div>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
-          <button class="btn btn-sm active" id="srcTabChina" type="button">China (1688 / Alibaba / AE)</button>
+          <button class="btn btn-sm active-view" id="srcTabChina" type="button">China Suppliers</button>
           <button class="btn btn-sm" id="srcTabTg" type="button">UA Telegram Drops</button>
         </div>
         <div class="supplier-list" id="drawerSuppliers"></div>
@@ -467,7 +583,17 @@
 
   <script>
     const API_BASE = (location.pathname === '/spy' || location.pathname.startsWith('/spy/')) ? '/spy' : '';
-    const state = { config: null, report: null, selectedCountries: new Set(), selectedSources: new Set(), activeDrawerItem: null };
+    const apiUrl = (p) => `${API_BASE}${p.startsWith('/') ? p : '/' + p}`;
+    const FALLBACK_SVG = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='220' viewBox='0 0 320 220'%3E%3Crect width='320' height='220' fill='%230f172a'/%3E%3Crect x='16' y='16' width='288' height='188' rx='12' fill='none' stroke='%23334155'/%3E%3Ctext x='160' y='114' fill='%2394a3b8' font-family='sans-serif' font-size='14' text-anchor='middle'%3EProduct Image%3C/text%3E%3C/svg%3E";
+
+    function imgSrc(raw) {
+      if (!raw) return FALLBACK_SVG;
+      if (raw.startsWith('data:image/')) return raw;
+      if (/^https?:\/\//i.test(raw)) return apiUrl(`/api/img?url=${encodeURIComponent(raw)}`);
+      return FALLBACK_SVG;
+    }
+
+    const state = { config: null, report: null, selectedCategories: new Set(), viewMode: 'gallery' };
     const $ = (id) => document.getElementById(id);
 
     function esc(v) {
@@ -495,34 +621,74 @@
       if (name === 'watchlist') { loadWatchlist(); loadHistory(); }
     }
 
-    function renderChips() {
-      const cfg = state.config;
-      if (!cfg) return;
-      const cWrap = $('countryChips');
-      cWrap.innerHTML = '<span class="group-label">Countries:</span>';
-      cfg.target_countries.forEach((code) => {
+    function renderCategoriesAndBlocks() {
+      const cats = state.config?.curated_categories || state.report?.curated_categories || {};
+      const wrap = $('categoryChips');
+      wrap.innerHTML = '<span class="group-label">Categories:</span>';
+      const fc = $('filterCategory');
+      const prevFc = fc.value;
+      fc.innerHTML = '<option value="">All Categories</option>';
+
+      Object.entries(cats).forEach(([key, cfg]) => {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = `chip ${state.selectedCountries.has(code) ? 'active' : ''}`;
-        b.textContent = code;
-        b.onclick = () => { state.selectedCountries.has(code) ? state.selectedCountries.delete(code) : state.selectedCountries.add(code); renderChips(); };
-        cWrap.appendChild(b);
+        b.className = `chip ${state.selectedCategories.has(key) ? 'active' : ''}`;
+        b.textContent = cfg.label;
+        b.onclick = () => {
+          state.selectedCategories.has(key) ? state.selectedCategories.delete(key) : state.selectedCategories.add(key);
+          renderCategoriesAndBlocks();
+        };
+        wrap.appendChild(b);
+
+        const opt = document.createElement('option');
+        opt.value = cfg.label;
+        opt.textContent = cfg.label;
+        fc.appendChild(opt);
       });
-      const sWrap = $('sourceChips');
-      sWrap.innerHTML = '<span class="group-label">Ad Sources:</span>';
-      cfg.available_sources.forEach((src) => {
+      fc.value = prevFc;
+
+      const blocks = state.report?.external_blocks || state.config?.external_blocks || [];
+      $('externalBlocksGrid').innerHTML = blocks.map((b) => `
+        <div class="mini-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${esc(b.source)}</strong>
+            <span class="badge ${b.status === 'blocked' ? 'badge-loss' : 'badge-warn'}">${esc(b.status)}</span>
+          </div>
+          <div class="prod-sub">${esc(b.reason)}</div>
+          <div style="font-size:11px;color:var(--accent);">${esc(b.action)}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderTrends(trends) {
+      const wrap = $('trendsChips');
+      wrap.innerHTML = '<span class="group-label">Google Trends:</span>';
+      if (!trends || !trends.length) {
+        wrap.innerHTML += '<span class="prod-sub">No trending feed loaded</span>';
+        return;
+      }
+      trends.slice(0, 8).forEach((t) => {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = `chip ${state.selectedSources.has(src) ? 'active' : ''}`;
-        b.textContent = src.toUpperCase();
-        b.onclick = () => { state.selectedSources.has(src) ? state.selectedSources.delete(src) : state.selectedSources.add(src); renderChips(); };
-        sWrap.appendChild(b);
+        b.className = 'chip trend';
+        b.textContent = t.traffic ? `${t.title} (${t.traffic})` : t.title;
+        b.onclick = () => { $('scanQuery').value = t.title; runScan(false); };
+        wrap.appendChild(b);
       });
-      const fc = $('filterCountry');
-      const prev = fc.value;
-      fc.innerHTML = '<option value="">All Countries</option>';
-      cfg.target_countries.forEach((c) => { const o = document.createElement('option'); o.value = c; o.textContent = c; fc.appendChild(o); });
-      fc.value = prev;
+    }
+
+    function renderDiagnostics() {
+      const diag = state.report?.source_diagnostics || {};
+      const strip = $('diagnosticsStrip');
+      const entries = Object.entries(diag);
+      if (!entries.length) {
+        strip.innerHTML = '';
+        return;
+      }
+      strip.innerHTML = entries.map(([src, msg]) => {
+        const cls = msg.startsWith('live:') ? 'ok' : (msg.startsWith('blocked') ? 'blk' : 'warn');
+        return `<span class="diag-chip ${cls}"><strong>${esc(src)}</strong>: ${esc(msg)}</span>`;
+      }).join('');
     }
 
     function renderSummary() {
@@ -533,6 +699,7 @@
       const total = s.total || 0;
       const winners = s.winners || 0;
       $('kpiTotal').textContent = total;
+      $('kpiLiveSub').textContent = `${s.live_count || 0} live items · ${winners} winners`;
       $('kpiWinners').textContent = winners;
       $('kpiWinRate').textContent = `${total ? Math.round((winners / total) * 100) : 0}% pass winner margin`;
       $('kpiAvgScore').textContent = Number(s.avg_opportunity_score || 0).toFixed(1);
@@ -540,22 +707,26 @@
       $('kpiPeakMargin').textContent = `$${Number(s.max_net_margin_usd || 0).toFixed(2)}`;
       $('kpiAvgMargin').textContent = `Avg Net: $${Number(s.avg_net_margin_usd || 0).toFixed(2)}`;
       $('modeDot').className = `status-dot ${m.mock ? 'mock' : ''}`;
-      $('modeText').textContent = m.mock ? 'Demo Dataset' : 'Live Public Scan';
+      $('modeText').textContent = m.mock ? 'Offline Demo' : 'Live Super-Parser';
       $('updatedAt').textContent = m.updated_at ? `Updated: ${new Date(m.updated_at).toLocaleTimeString()}` : 'Updated: —';
+      renderDiagnostics();
+      if (rep.trending_keywords && rep.trending_keywords.length) renderTrends(rep.trending_keywords);
     }
 
     function getFilteredProducts() {
       const products = [...(state.report?.products || [])];
       const q = $('filterSearch').value.trim().toLowerCase();
-      const geo = $('filterCountry').value;
+      const cat = $('filterCategory').value;
+      const src = $('filterSource').value;
       const winnersOnly = $('filterWinnersOnly').checked;
       const sortBy = $('sortField').value;
 
       const filtered = products.filter((item) => {
         if (winnersOnly && !item.margin.is_winner) return false;
-        if (geo && !(item.ad.countries || []).includes(geo)) return false;
+        if (cat && item.category !== cat) return false;
+        if (src && (item.source || item.ad.source) !== src) return false;
         if (q) {
-          const blob = [item.landing.title, item.ad.page_name, item.landing.platform, item.ad.source].join(' ').toLowerCase();
+          const blob = [item.landing.title, item.ad.page_name, item.category, item.source].join(' ').toLowerCase();
           if (!blob.includes(q)) return false;
         }
         return true;
@@ -563,88 +734,123 @@
       filtered.sort((a, b) => {
         if (sortBy === 'margin') return b.margin.net_margin_usd - a.margin.net_margin_usd;
         if (sortBy === 'ua') return (b.economics?.ua_cod_net_profit_usd ?? -999) - (a.economics?.ua_cod_net_profit_usd ?? -999);
-        if (sortBy === 'days') return b.ad.days_running - a.ad.days_running;
+        if (sortBy === 'cogs') return a.margin.china_wholesale_price_usd - b.margin.china_wholesale_price_usd;
         return (b.economics?.opportunity_score ?? 0) - (a.economics?.opportunity_score ?? 0);
       });
       return filtered;
     }
 
-    function renderTable() {
+    function renderProducts() {
       const rows = getFilteredProducts();
+      const gWrap = $('galleryContainer');
       const tbody = $('offersBody');
+
       if (!rows.length) {
+        gWrap.innerHTML = '<div class="loading-box" style="grid-column:1/-1;">No products match your filters. Click <b>⚡ Super Parse All Categories</b> to fetch live products.</div>';
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px;">No matching offers.</td></tr>';
         return;
       }
-      tbody.innerHTML = rows.map((item) => {
+
+      gWrap.innerHTML = rows.map((item) => {
         const ad = item.ad, l = item.landing, m = item.margin, e = item.economics || {};
-        const img = l.image_url || ad.ad_creative_image_url || '';
         const score = Number(e.opportunity_score || 0);
         const model = e.recommended_model || 'CROSS_BORDER';
         const uaProf = Number(e.ua_cod_net_profit_usd || 0);
         const cbProf = Number(e.cross_border_net_profit_usd ?? m.net_margin_usd);
-        const geos = (ad.countries || []).map((c) => `<span class="badge">${esc(c)}</span>`).join(' ');
+        const pic = imgSrc(item.image_url || l.image_url || ad.ad_creative_image_url);
+        const prodUrl = item.product_url || l.final_url || l.url;
+        const liveTag = (item.is_live ?? ad.is_live)
+          ? '<span class="badge badge-win">LIVE</span>'
+          : '<span class="badge badge-warn">DEMO</span>';
+        const soldPill = item.sold_text ? `<span class="badge badge-win">${esc(item.sold_text)}</span>` : '';
+        const ratePill = item.rating ? `<span class="badge">★ ${Number(item.rating).toFixed(1)}</span>` : '';
+
         return `
-          <tr data-ad-id="${esc(ad.ad_id)}">
+          <article class="product-card" data-ad-id="${esc(ad.ad_id)}">
+            <div class="card-media" onclick="openDrawer('${esc(ad.ad_id)}')">
+              <img src="${esc(pic)}" alt="${esc(l.title)}" loading="lazy" onerror="this.onerror=null;this.src='${FALLBACK_SVG}'" />
+              <div class="media-top-left">
+                ${liveTag}
+                <span class="badge badge-src">${esc(item.source || ad.source)}</span>
+              </div>
+              <div class="media-top-right">
+                <span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span>
+              </div>
+              <div class="media-bottom-left">
+                ${item.category ? `<span class="badge">${esc(item.category)}</span>` : ''}
+                ${soldPill}${ratePill}
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="card-title" onclick="openDrawer('${esc(ad.ad_id)}')" title="${esc(l.title)}">${esc(l.title || 'Untitled Product')}</div>
+              <div class="card-meta">
+                <span>${esc(ad.page_name)}</span>
+                <span class="mono">COGS <b>$${Number(m.china_wholesale_price_usd).toFixed(2)}</b> → Retail <b>$${Number(m.retail_price_usd).toFixed(2)}</b></span>
+              </div>
+              <div class="profit-strip">
+                <div class="profit-box">
+                  <span class="profit-label">UA COD Net</span>
+                  <span class="profit-val ${uaProf >= 0 ? 'text-win' : 'text-loss'}">$${uaProf.toFixed(2)} (${Number(e.ua_cod_roi_pct || 0).toFixed(0)}%)</span>
+                </div>
+                <div class="profit-box">
+                  <span class="profit-label">Cross-Border · ${esc(model)}</span>
+                  <span class="profit-val ${cbProf >= 0 ? 'text-accent' : 'text-loss'}">$${cbProf.toFixed(2)} (${Number(e.cross_border_roi_pct || 0).toFixed(0)}%)</span>
+                </div>
+              </div>
+              <div class="card-links">
+                <a class="btn btn-sm btn-primary" href="${esc(prodUrl)}" target="_blank" rel="noopener noreferrer">Listing ↗</a>
+                ${item.ali_url && item.ali_url !== prodUrl ? `<a class="btn btn-sm" href="${esc(item.ali_url)}" target="_blank" rel="noopener noreferrer">AliExpress ↗</a>` : ''}
+                ${item.prom_url && item.prom_url !== prodUrl ? `<a class="btn btn-sm" href="${esc(item.prom_url)}" target="_blank" rel="noopener noreferrer">Prom ↗</a>` : ''}
+                <button class="btn btn-sm" onclick="openDrawer('${esc(ad.ad_id)}')" type="button">Inspect</button>
+                <button class="btn btn-sm btn-win" onclick="saveWatchlistItem('${esc(ad.ad_id)}')" type="button">★</button>
+              </div>
+            </div>
+          </article>`;
+      }).join('');
+
+      tbody.innerHTML = rows.map((item) => {
+        const ad = item.ad, l = item.landing, m = item.margin, e = item.economics || {};
+        const score = Number(e.opportunity_score || 0);
+        const pic = imgSrc(item.image_url || l.image_url);
+        const prodUrl = item.product_url || l.final_url || l.url;
+        return `
+          <tr onclick="openDrawer('${esc(ad.ad_id)}')">
             <td>
               <div class="prod-cell">
-                ${img ? `<img class="prod-thumb" src="${esc(img)}" alt="" onerror="this.style.visibility='hidden'" />` : '<div class="prod-thumb"></div>'}
+                <img class="prod-thumb" src="${esc(pic)}" alt="" onerror="this.onerror=null;this.src='${FALLBACK_SVG}'" />
                 <div>
-                  <div class="prod-title" title="${esc(l.title)}">${esc(l.title || 'Untitled Offer')}</div>
-                  <div class="prod-sub">${esc(ad.page_name)} · ${esc(l.platform)}</div>
+                  <div class="prod-title">${esc(l.title || 'Untitled')}</div>
+                  <div class="prod-sub">${esc(ad.page_name)}</div>
                 </div>
               </div>
             </td>
-            <td>
-              <div style="display:flex;align-items:center;gap:6px;">
-                <span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span>
-                <span class="badge badge-src">${esc(model)}</span>
-              </div>
-            </td>
-            <td>
-              <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
-                <span class="badge">${esc(ad.source)}</span>${geos}
-              </div>
-              <div class="prod-sub mono">${ad.days_running}d · ${ad.active_ad_sets} sets</div>
-            </td>
-            <td class="mono ${uaProf >= 0 ? 'text-win' : 'text-loss'}">
-              <div>$${uaProf.toFixed(2)}</div>
-              <div class="prod-sub">ROI ${Number(e.ua_cod_roi_pct || 0).toFixed(0)}%</div>
-            </td>
-            <td class="mono ${cbProf >= 0 ? 'text-win' : 'text-loss'}">
-              <div>$${cbProf.toFixed(2)}</div>
-              <div class="prod-sub">Retail $${Number(m.retail_price_usd).toFixed(2)}</div>
-            </td>
-            <td class="mono">$${Number(m.china_wholesale_price_usd).toFixed(2)}</td>
-            <td>
-              <div style="display:flex;gap:6px;" onclick="event.stopPropagation()">
-                <button class="btn btn-sm" data-inspect="${esc(ad.ad_id)}" type="button">Inspect</button>
-                <button class="btn btn-sm btn-win" data-save="${esc(ad.ad_id)}" type="button">★ Save</button>
-              </div>
+            <td><span class="badge badge-src">${esc(item.source || ad.source)}</span> <span class="prod-sub">${esc(item.category || '')}</span></td>
+            <td><span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span> <span class="badge">${esc(e.recommended_model || 'CROSS_BORDER')}</span></td>
+            <td class="mono">$${Number(e.ua_cod_net_profit_usd || 0).toFixed(2)}</td>
+            <td class="mono">$${Number(e.cross_border_net_profit_usd ?? m.net_margin_usd).toFixed(2)}</td>
+            <td class="mono">$${Number(m.china_wholesale_price_usd).toFixed(2)} / $${Number(m.retail_price_usd).toFixed(2)}</td>
+            <td onclick="event.stopPropagation()">
+              <a class="btn btn-sm" href="${esc(prodUrl)}" target="_blank" rel="noopener noreferrer">Open ↗</a>
+              <button class="btn btn-sm btn-win" onclick="saveWatchlistItem('${esc(ad.ad_id)}')" type="button">★</button>
             </td>
           </tr>`;
       }).join('');
-
-      tbody.querySelectorAll('tr[data-ad-id]').forEach((tr) => { tr.onclick = () => openDrawer(tr.dataset.adId); });
-      tbody.querySelectorAll('button[data-inspect]').forEach((b) => { b.onclick = () => openDrawer(b.dataset.inspect); });
-      tbody.querySelectorAll('button[data-save]').forEach((b) => { b.onclick = () => saveWatchlistItem(b.dataset.save); });
     }
 
     function openDrawer(adId) {
       const item = (state.report?.products || []).find((p) => p.ad.ad_id === adId);
       if (!item) return;
-      state.activeDrawerItem = item;
       const ad = item.ad, l = item.landing, m = item.margin, e = item.economics || {};
-      $('drawerImg').src = l.image_url || ad.ad_creative_image_url || '';
+      const pic = imgSrc(item.image_url || l.image_url || ad.ad_creative_image_url);
+      $('drawerImg').src = pic;
+      $('drawerImg').onerror = () => { $('drawerImg').src = FALLBACK_SVG; };
       $('drawerTitle').textContent = l.title || 'Untitled Offer';
-      $('drawerMeta').textContent = `${ad.page_name} · ${ad.source.toUpperCase()} · ${ad.days_running}d / ${ad.active_ad_sets} sets`;
-      $('drawerPlatform').textContent = l.platform || 'Unknown';
+      $('drawerMeta').textContent = `${ad.page_name} · ${(item.source || ad.source).toUpperCase()} · ${item.category || 'General'}`;
+      $('drawerPlatform').textContent = l.platform || 'Live';
       $('drawerWinnerBadge').textContent = m.is_winner ? 'IS_WINNER' : 'REVIEW';
       $('drawerWinnerBadge').className = `badge ${m.is_winner ? 'badge-win' : 'badge-warn'}`;
       $('drawerModelBadge').textContent = `${e.recommended_model || 'CROSS_BORDER'} (${Number(e.opportunity_score || 0).toFixed(0)}/100)`;
-      $('drawerLandingLink').href = l.final_url || l.url || '#';
-      $('drawerAdLink').href = ad.ad_creative_image_url || '#';
-      $('drawerAdLink').style.display = ad.ad_creative_image_url ? 'inline-flex' : 'none';
+      $('drawerLandingLink').href = item.product_url || l.final_url || l.url || '#';
 
       $('drawerWaterfall').innerHTML = `
         <div class="wf-row"><span>Demand Velocity / Competition</span><span class="mono">${Number(e.demand_velocity_score || 0).toFixed(0)} / ${Number(e.competition_score || 0).toFixed(0)}</span></div>
@@ -659,24 +865,24 @@
         <div class="mini-card">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <strong>${esc(s.platform || s.source)}</strong>
-            <span class="badge ${s.status === 'blocked' ? 'badge-loss' : 'badge-win'}">${esc(s.status)}</span>
+            <span class="badge badge-win">${esc(s.status)}</span>
           </div>
           <div class="mono" style="font-size:13px;">Median: ${s.median_price ? `${s.median_price} ${esc(s.currency)} ($${s.median_price_usd})` : 'N/A'}</div>
-          <div class="prod-sub">Listings: ${s.listing_count} · Sold: ${s.sold_count} · Vel: ${s.sold_velocity_score}</div>
+          ${s.top_sample_url ? `<a href="${esc(s.top_sample_url)}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">Open Sample ↗</a>` : ''}
         </div>
-      `).join('') : '<div class="prod-sub">No marketplace signals fetched.</div>';
+      `).join('') : '<div class="prod-sub">No marketplace benchmarks attached.</div>';
 
       const sups = item.suppliers || [];
       $('drawerSuppliers').innerHTML = sups.length ? sups.map((s, idx) => `
         <div class="supplier-card ${idx === 0 ? 'best' : ''}">
           <div class="supplier-top">
-            <strong>${esc(s.supplier_name)} <span class="badge">${esc(s.source || '1688')}</span></strong>
-            <span class="mono text-win">$${Number(s.wholesale_price_usd).toFixed(2)} (¥${Number(s.wholesale_price_rmb).toFixed(1)})</span>
+            <strong>${esc(s.supplier_name)} <span class="badge badge-src">${esc(s.source)}</span></strong>
+            <span class="mono text-win">$${Number(s.wholesale_price_usd).toFixed(2)}</span>
           </div>
           <div class="prod-sub">${esc(s.product_title)}</div>
           <div style="display:flex;justify-content:space-between;font-size:12px;">
-            <span class="mono">MOQ: ${s.moq} · Rating: ${s.rating ?? '—'}</span>
-            <a href="${esc(s.product_url)}" target="_blank" rel="noopener">Open Supplier ↗</a>
+            <span class="mono">${esc(s.sales_count_text || `MOQ ${s.moq}`)} ${s.rating ? `· ★ ${s.rating}` : ''}</span>
+            <a href="${esc(s.product_url)}" target="_blank" rel="noopener noreferrer">Open Supplier ↗</a>
           </div>
         </div>
       `).join('') : '<div class="prod-sub">No China suppliers matched.</div>';
@@ -690,81 +896,76 @@
           </div>
           <div class="prod-sub">${esc(t.title)}</div>
           <div style="display:flex;justify-content:space-between;font-size:12px;">
-            <span class="mono">${t.in_stock ? 'In Stock' : 'Out of Stock'} · ${esc(t.supplier_contact)}</span>
-            <a href="${esc(t.post_url)}" target="_blank" rel="noopener">Open Post ↗</a>
+            <span class="mono">${esc(t.supplier_contact)}</span>
+            <a href="${esc(t.post_url)}" target="_blank" rel="noopener noreferrer">Open Post ↗</a>
           </div>
         </div>
-      `).join('') : '<div class="prod-sub">No Ukrainian Telegram drop offers matched.</div>';
+      `).join('') : '<div class="prod-sub">No UA Telegram drop channels matched. Add real @handles in the UA Telegram Drops tab.</div>';
 
       $('drawerWatchBtn').onclick = () => saveWatchlistItem(ad.ad_id);
       $('drawerAlertBtn').onclick = () => sendAlert(ad.ad_id);
       $('drawerLoadSimBtn').onclick = () => loadItemIntoSimulator(item);
       $('drawerBackdrop').classList.add('open');
     }
+    window.openDrawer = openDrawer;
 
     function loadItemIntoSimulator(item) {
       $('simRetail').value = item.margin.retail_price_usd || 30;
       $('simChina').value = item.margin.china_wholesale_price_usd || 4;
       const tg = (item.tg_offers || [])[0];
-      if (tg) {
-        $('simDropUah').value = tg.drop_price_uah || 300;
-        $('simRrcUah').value = tg.rrc_price_uah || 900;
-      }
+      if (tg) { $('simDropUah').value = tg.drop_price_uah || 300; $('simRrcUah').value = tg.rrc_price_uah || 900; }
       $('drawerBackdrop').classList.remove('open');
       switchTab('simulator');
       runSimulation();
     }
 
     async function runSimulation() {
-      try {
-        const res = await fetch(`${API_BASE}/api/simulate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            retail_price_usd: Number($('simRetail').value),
-            china_wholesale_usd: Number($('simChina').value),
-            drop_price_uah: Number($('simDropUah').value),
-            rrc_price_uah: Number($('simRrcUah').value),
-            ua_return_rate: Number($('simReturnRate').value),
-            ua_cpa_usd: Number($('simUaCpa').value),
-            cross_border_cpa_usd: Number($('simCbCpa').value),
-            shipping_usd: Number($('simShip').value),
-            marketplace_fee_pct: Number($('simMktFee').value),
-            payment_fee_pct: Number($('simPayFee').value),
-          }),
-        });
-        const d = await res.json();
-        $('simUaProfit').textContent = `$${d.ua_cod_net_profit_usd.toFixed(2)}`;
-        $('simUaRoi').textContent = `${d.ua_cod_roi_pct.toFixed(1)}%`;
-        $('simReturnDrag').textContent = `-$${d.ua_return_drag_usd.toFixed(2)}`;
-        $('simCbProfit').textContent = `$${d.cross_border_net_profit_usd.toFixed(2)}`;
-        $('simCbRoi').textContent = `${d.cross_border_roi_pct.toFixed(1)}%`;
-        $('simOppScore').textContent = `${d.opportunity_score.toFixed(1)} / 100`;
-        $('simVerdict').textContent = d.recommended_model;
-      } catch (err) {
-        showToast(`Simulation error: ${err.message}`, false);
-      }
+      const res = await fetch(apiUrl('/api/simulate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          retail_price_usd: Number($('simRetail').value),
+          china_wholesale_usd: Number($('simChina').value),
+          drop_price_uah: Number($('simDropUah').value),
+          rrc_price_uah: Number($('simRrcUah').value),
+          ua_return_rate: Number($('simReturnRate').value),
+          ua_cpa_usd: Number($('simUaCpa').value),
+          cross_border_cpa_usd: Number($('simCbCpa').value),
+          shipping_usd: Number($('simShip').value),
+          marketplace_fee_pct: Number($('simMktFee').value),
+          payment_fee_pct: Number($('simPayFee').value),
+        }),
+      });
+      const d = await res.json();
+      $('simUaProfit').textContent = `$${d.ua_cod_net_profit_usd.toFixed(2)}`;
+      $('simUaRoi').textContent = `${d.ua_cod_roi_pct.toFixed(1)}%`;
+      $('simReturnDrag').textContent = `-$${d.ua_return_drag_usd.toFixed(2)}`;
+      $('simCbProfit').textContent = `$${d.cross_border_net_profit_usd.toFixed(2)}`;
+      $('simCbRoi').textContent = `${d.cross_border_roi_pct.toFixed(1)}%`;
+      $('simOppScore').textContent = `${d.opportunity_score.toFixed(1)} / 100`;
+      $('simVerdict').textContent = d.recommended_model;
     }
 
     async function loadTgChannels() {
-      const res = await fetch(`${API_BASE}/api/tg-channels`);
+      const res = await fetch(apiUrl('/api/tg-channels'));
       const data = await res.json();
-      $('tgChannelsGrid').innerHTML = (data.channels || []).map((c) => `
+      const list = data.channels || [];
+      $('tgChannelsGrid').innerHTML = list.length ? list.map((c) => `
         <div class="mini-card">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <strong>@${esc(c.handle)}</strong>
             <button class="btn btn-sm btn-loss" onclick="removeTgChannel('${esc(c.handle)}')" type="button">Remove</button>
           </div>
-          <div class="prod-sub">${esc(c.label)} · ${c.enabled ? 'Enabled' : 'Paused'}</div>
-          <a href="https://t.me/s/${esc(c.handle)}" target="_blank" rel="noopener" style="font-size:12px;">Preview t.me/s/${esc(c.handle)} ↗</a>
+          <div class="prod-sub">${esc(c.label)}</div>
+          <a href="https://t.me/s/${esc(c.handle)}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">Preview t.me/s/${esc(c.handle)} ↗</a>
         </div>
-      `).join('');
+      `).join('') : '<div class="prod-sub">No custom Telegram channels added yet. Paste any public Ukrainian drop channel handle above.</div>';
     }
 
     async function addTgChannel() {
       const handle = $('tgHandleInput').value.trim();
       if (!handle) return;
-      const res = await fetch(`${API_BASE}/api/tg-channels`, {
+      const res = await fetch(apiUrl('/api/tg-channels'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ handle, label: $('tgLabelInput').value.trim(), enabled: true, test_scrape: $('tgTestScrape').checked }),
@@ -773,12 +974,12 @@
       if (!res.ok) { showToast(data.detail || 'Invalid channel', false); return; }
       $('tgHandleInput').value = '';
       $('tgLabelInput').value = '';
-      showToast(`Channel @${data.channel.handle} saved${data.preview_count != null ? ` (${data.preview_count} drop posts parsed)` : ''}.`, true);
+      showToast(`Channel @${data.channel.handle} saved${data.preview_count != null ? ` (${data.preview_count} drop posts found)` : ''}.`, true);
       loadTgChannels();
     }
 
     async function removeTgChannel(handle) {
-      await fetch(`${API_BASE}/api/tg-channels/${encodeURIComponent(handle)}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/api/tg-channels/${encodeURIComponent(handle)}`), { method: 'DELETE' });
       loadTgChannels();
     }
     window.removeTgChannel = removeTgChannel;
@@ -786,7 +987,7 @@
     async function saveWatchlistItem(adId) {
       const item = (state.report?.products || []).find((p) => p.ad.ad_id === adId);
       if (!item) return;
-      await fetch(`${API_BASE}/api/watchlist`, {
+      await fetch(apiUrl('/api/watchlist'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -799,11 +1000,11 @@
       });
       showToast(`Saved "${item.landing.title || adId}" to watchlist.`, true);
     }
+    window.saveWatchlistItem = saveWatchlistItem;
 
     async function loadWatchlist() {
-      const res = await fetch(`${API_BASE}/api/watchlist`);
-      const data = await res.json();
-      const items = data.items || [];
+      const res = await fetch(apiUrl('/api/watchlist'));
+      const items = (await res.json()).items || [];
       $('watchlistContainer').innerHTML = items.length ? items.map((w) => `
         <div class="supplier-card">
           <div class="supplier-top">
@@ -819,55 +1020,61 @@
     }
 
     async function deleteWatch(key) {
-      await fetch(`${API_BASE}/api/watchlist/${encodeURIComponent(key)}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/api/watchlist/${encodeURIComponent(key)}`), { method: 'DELETE' });
       loadWatchlist();
     }
     window.deleteWatch = deleteWatch;
 
     async function loadHistory() {
-      const res = await fetch(`${API_BASE}/api/scans`);
-      const data = await res.json();
-      const scans = data.scans || [];
+      const res = await fetch(apiUrl('/api/scans'));
+      const scans = (await res.json()).scans || [];
       $('historyContainer').innerHTML = scans.length ? scans.map((s) => `
         <div class="supplier-card">
           <div class="supplier-top">
-            <strong>Scan #${s.id}: ${esc(s.query || 'All Trending')}</strong>
+            <strong>Scan #${s.id}: ${esc(s.query || 'Super Parse')}</strong>
             <span class="badge">${s.winners_count}/${s.total_count} winners</span>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="prod-sub mono">${esc((s.countries || []).join(','))} · ${new Date(s.created_at).toLocaleString()}</span>
-            <button class="btn btn-sm" onclick="restoreScan(${s.id})" type="button">Load Scan</button>
+            <span class="prod-sub mono">${new Date(s.created_at).toLocaleString()}</span>
+            <button class="btn btn-sm" onclick="restoreScan(${s.id})" type="button">Load</button>
           </div>
         </div>
-      `).join('') : '<div class="prod-sub">No persisted scans yet.</div>';
+      `).join('') : '<div class="prod-sub">No scans recorded yet.</div>';
     }
 
     async function restoreScan(id) {
-      const res = await fetch(`${API_BASE}/api/scans/${id}`);
+      const res = await fetch(apiUrl(`/api/scans/${id}`));
       if (!res.ok) return;
       const scan = await res.json();
-      state.report = { meta: { query: scan.query, countries: scan.countries, mock: false, updated_at: scan.created_at }, summary: state.report?.summary || {}, products: scan.reports || [] };
-      renderTable();
+      state.report = { ...(state.report || {}), meta: { query: scan.query, countries: scan.countries, mock: false, updated_at: scan.created_at }, products: scan.reports || [] };
+      renderSummary();
+      renderProducts();
       switchTab('radar');
-      showToast(`Loaded scan #${id} (${(scan.reports || []).length} offers).`, true);
+      showToast(`Loaded scan #${id} (${(scan.reports || []).length} items).`, true);
     }
     window.restoreScan = restoreScan;
 
-    async function runScan() {
-      const btn = $('runScanBtn');
+    async function runScan(superMode = false) {
+      const btn = superMode ? $('superParseBtn') : $('runScanBtn');
+      const prevTxt = btn.textContent;
       btn.disabled = true;
-      btn.textContent = 'Scanning...';
+      btn.textContent = superMode ? 'Super Parsing Live Sources...' : 'Searching Live...';
+      if (!(state.report?.products || []).length) {
+        $('galleryContainer').innerHTML = '<div class="loading-box" style="grid-column:1/-1;">Fetching live products, photos &amp; prices from AliExpress, Prom.ua, OLX &amp; Google Trends...</div>';
+      }
       try {
-        const res = await fetch(`${API_BASE}/api/scan`, {
+        const endpoint = superMode ? '/api/super-parse' : '/api/scan';
+        const cats = Array.from(state.selectedCategories);
+        const res = await fetch(apiUrl(endpoint), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            query: $('scanQuery').value.trim(),
+            query: superMode ? '' : $('scanQuery').value.trim(),
+            categories: cats.length ? cats : null,
+            super_parse: superMode,
+            geo: $('trendsGeo').value,
             proxy_url: $('scanProxy').value.trim() || null,
-            countries: Array.from(state.selectedCountries),
-            sources: Array.from(state.selectedSources),
             mock: $('toggleMock').checked,
-            send_alerts: $('toggleAutoAlert').checked,
             min_duration_days: Number($('thMinDays').value),
             min_active_ad_sets: Number($('thMinSets').value),
             shipping_cost_est_usd: Number($('thShipping').value),
@@ -877,20 +1084,21 @@
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         state.report = await res.json();
+        renderCategoriesAndBlocks();
         renderSummary();
-        renderTable();
-        showToast(`Scan finished: ${state.report.summary.total} offers (${state.report.summary.winners} winners).`, true);
+        renderProducts();
+        showToast(`Loaded ${state.report.summary.total} products (${state.report.summary.live_count || 0} live).`, true);
       } catch (err) {
         showToast(`Scan failed: ${err.message}`, false);
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Run Intelligence Scan';
+        btn.textContent = prevTxt;
       }
     }
 
     async function sendAlert(adId) {
       const useMock = !(state.config && state.config.telegram_configured);
-      const res = await fetch(`${API_BASE}/api/alert`, {
+      const res = await fetch(apiUrl('/api/alert'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ad_id: adId, mock: useMock }),
@@ -899,39 +1107,66 @@
       showToast(data.sent ? `Telegram alert ${data.mock ? 'previewed' : 'sent'} for ${adId}.` : `Alert skipped for ${adId}.`, data.sent);
     }
 
+    async function loadTrendsForGeo() {
+      try {
+        const res = await fetch(apiUrl(`/api/trends?geo=${encodeURIComponent($('trendsGeo').value)}`));
+        const data = await res.json();
+        renderTrends(data.trends || []);
+      } catch (_) {}
+    }
+
     async function loadInitial() {
-      $('exportCsvBtn').href = `${API_BASE}/api/export/csv`;
-      $('exportJsonBtn').href = `${API_BASE}/api/export/json`;
-      const [cfgRes, repRes] = await Promise.all([fetch(`${API_BASE}/api/config`), fetch(`${API_BASE}/api/report`)]);
+      $('exportCsvBtn').href = apiUrl('/api/export/csv');
+      $('exportJsonBtn').href = apiUrl('/api/export/json');
+      const [cfgRes, repRes] = await Promise.all([fetch(apiUrl('/api/config')), fetch(apiUrl('/api/report'))]);
       state.config = await cfgRes.json();
       state.report = await repRes.json();
-      state.selectedCountries = new Set(state.config.target_countries || []);
-      state.selectedSources = new Set(state.config.available_sources || []);
+
       $('thMinDays').value = state.config.min_duration_days;
       $('thMinSets').value = state.config.min_active_ad_sets;
       $('thShipping').value = state.config.shipping_cost_est_usd;
       $('thCpa').value = state.config.est_cpa_usd;
       $('thWinnerMin').value = state.config.winner_net_margin_usd;
-      renderChips();
+
+      renderCategoriesAndBlocks();
       renderSummary();
-      renderTable();
+      renderProducts();
+      loadTrendsForGeo();
       runSimulation();
+
+      if (!(state.report?.products || []).length) {
+        await runScan(true);
+      }
     }
 
     document.querySelectorAll('.tab-btn').forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
-    $('runScanBtn').onclick = runScan;
+    $('runScanBtn').onclick = () => runScan(false);
+    $('superParseBtn').onclick = () => runScan(true);
+    $('trendsGeo').onchange = loadTrendsForGeo;
     $('runSimBtn').onclick = runSimulation;
     $('addTgBtn').onclick = addTgChannel;
-    $('toggleThresholdsBtn').onclick = () => {
-      const p = $('thresholdsPanel');
-      p.style.display = p.style.display === 'none' ? 'grid' : 'none';
+    $('toggleThresholdsBtn').onclick = () => { const p = $('thresholdsPanel'); p.style.display = p.style.display === 'none' ? 'grid' : 'none'; };
+    $('toggleBlocksBtn').onclick = () => { const p = $('externalBlocksPanel'); p.style.display = p.style.display === 'none' ? 'block' : 'none'; };
+    $('viewGalleryBtn').onclick = () => {
+      state.viewMode = 'gallery';
+      $('galleryContainer').style.display = 'grid';
+      $('tableContainer').style.display = 'none';
+      $('viewGalleryBtn').classList.add('active-view');
+      $('viewTableBtn').classList.remove('active-view');
     };
-    ['filterSearch', 'filterCountry', 'filterWinnersOnly', 'sortField'].forEach((id) => {
-      $(id).addEventListener('input', renderTable);
-      $(id).addEventListener('change', renderTable);
+    $('viewTableBtn').onclick = () => {
+      state.viewMode = 'table';
+      $('galleryContainer').style.display = 'none';
+      $('tableContainer').style.display = 'block';
+      $('viewTableBtn').classList.add('active-view');
+      $('viewGalleryBtn').classList.remove('active-view');
+    };
+    ['filterSearch', 'filterCategory', 'filterSource', 'filterWinnersOnly', 'sortField'].forEach((id) => {
+      $(id).addEventListener('input', renderProducts);
+      $(id).addEventListener('change', renderProducts);
     });
-    $('srcTabChina').onclick = () => { $('drawerSuppliers').style.display = 'flex'; $('drawerTgOffers').style.display = 'none'; };
-    $('srcTabTg').onclick = () => { $('drawerSuppliers').style.display = 'none'; $('drawerTgOffers').style.display = 'flex'; };
+    $('srcTabChina').onclick = () => { $('drawerSuppliers').style.display = 'flex'; $('drawerTgOffers').style.display = 'none'; $('srcTabChina').classList.add('active-view'); $('srcTabTg').classList.remove('active-view'); };
+    $('srcTabTg').onclick = () => { $('drawerSuppliers').style.display = 'none'; $('drawerTgOffers').style.display = 'flex'; $('srcTabTg').classList.add('active-view'); $('srcTabChina').classList.remove('active-view'); };
     $('closeDrawerBtn').onclick = () => $('drawerBackdrop').classList.remove('open');
     $('drawerBackdrop').onclick = (e) => { if (e.target === $('drawerBackdrop')) $('drawerBackdrop').classList.remove('open'); };
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('drawerBackdrop').classList.remove('open'); });

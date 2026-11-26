@@ -1,22 +1,24 @@
+import ipaddress
 import json
 import logging
+import socket
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+import httpx
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from ad_collector import filter_winning_ads, generate_mock_ads
-from china_matcher import _mock_suppliers
-from config import AnalyzedProductReport, Settings, TelegramDropOffer, get_settings
-from landing_parser import _mock_landing_for_url
-from main import run_pipeline
-from margin_calculator import calculate_cofounder_economics, calculate_profitability
-from marketplace_intel import _mock_signals_for_query
+from config import CURATED_CATEGORIES, AnalyzedProductReport, Settings, TelegramDropOffer, get_httpx_proxy, get_settings
+from main import DEFAULT_EXTERNAL_BLOCKS, run_pipeline, run_super_parse
+from margin_calculator import calculate_cofounder_economics
 from notifier import export_reports, send_telegram_alert
-from sourcing_engine import _mock_tg_offers, search_telegram_dropshipping
+from sourcing_engine import fetch_google_trends_rss, search_telegram_dropshipping
 from storage import (
     delete_tg_channel,
     get_scan,
@@ -32,6 +34,10 @@ from storage import (
 logger = logging.getLogger(__name__)
 
 STATIC_INDEX_PATH = Path(__file__).resolve().parent / "static" / "index.html"
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/avif"}
+_MAX_IMAGE_BYTES = 4 * 1024 * 1024
+_IMG_CACHE_TTL = 3600
+_IMG_CACHE_MAX = 128
 
 
 class SpyPrefixMiddleware:
@@ -57,12 +63,16 @@ class SpyPrefixMiddleware:
 
 
 class ScanRequest(BaseModel):
-    """Request payload for triggering an ad spy & market intelligence scan."""
+    """Request payload for triggering live or demo product discovery."""
 
     query: str = ""
     countries: Optional[list[str]] = None
     sources: Optional[list[str]] = None
-    mock: bool = True
+    categories: Optional[list[str]] = None
+    super_parse: bool = False
+    geo: str = "UA"
+    mock: bool = False
+    use_mock: Optional[bool] = None
     send_alerts: bool = False
     proxy_url: Optional[str] = None
     min_duration_days: Optional[int] = Field(default=None, ge=0)
@@ -124,70 +134,21 @@ class AppState:
         self.settings = settings
         self.products: list[AnalyzedProductReport] = []
         self.exported: dict[str, str] = {}
+        self.source_diagnostics: dict[str, str] = {}
+        self.trending_keywords: list[dict[str, str]] = []
+        self.external_blocks: list[dict[str, str]] = list(DEFAULT_EXTERNAL_BLOCKS)
+        self.img_cache: OrderedDict[str, tuple[float, bytes, str]] = OrderedDict()
         self.last_scan_meta: dict[str, Any] = {
             "query": "",
             "countries": list(settings.TARGET_COUNTRIES),
-            "sources": ["meta", "adheart", "tiktok"],
-            "mock": True,
+            "sources": ["aliexpress", "prom_ua", "olx_ua", "olx_pl"],
+            "mock": False,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
 
-def _build_initial_mock_reports(settings: Settings) -> list[AnalyzedProductReport]:
-    """Synchronously assemble deterministic mock reports with market intel & economics."""
-    ads = filter_winning_ads(
-        generate_mock_ads(countries=settings.TARGET_COUNTRIES),
-        min_duration_days=settings.MIN_DURATION_DAYS,
-        min_active_ad_sets=settings.MIN_ACTIVE_AD_SETS,
-        target_countries=settings.TARGET_COUNTRIES,
-    )
-    reports: list[AnalyzedProductReport] = []
-    platforms = ["olx_ua", "prom_ua", "allegro_pl", "olx_pl", "amazon_us"]
-    for ad in ads:
-        landing = _mock_landing_for_url(ad.landing_url)
-        img = landing.image_url or ad.ad_creative_image_url or ""
-        suppliers = _mock_suppliers(img, settings)
-        best = suppliers[0] if suppliers else None
-        wholesale_usd = best.wholesale_price_usd if best else 0.0
-        margin = calculate_profitability(
-            landing.price or 0.0,
-            landing.currency or "USD",
-            wholesale_usd,
-            settings,
-        )
-        title = landing.title or ad.page_name
-        signals = _mock_signals_for_query(title, platforms)
-        tg_offers = _mock_tg_offers(title)
-        econ = calculate_cofounder_economics(
-            retail_price_usd=margin.retail_price_usd,
-            china_wholesale_usd=wholesale_usd,
-            settings=settings,
-            ad_days_running=ad.days_running,
-            ad_active_sets=ad.active_ad_sets,
-            marketplace_signals=signals,
-            best_tg_offer=tg_offers[0] if tg_offers else None,
-        )
-        reports.append(
-            AnalyzedProductReport(
-                ad=ad,
-                landing=landing,
-                suppliers=suppliers,
-                best_supplier=best,
-                margin=margin,
-                marketplace_signals=signals,
-                tg_offers=tg_offers,
-                economics=econ,
-            )
-        )
-    reports.sort(
-        key=lambda r: (r.economics.opportunity_score if r.economics else 0.0, r.margin.net_margin_usd),
-        reverse=True,
-    )
-    return reports
-
-
-def _load_or_seed_state(output_dir: Path, settings: Settings) -> AppState:
-    """Load persisted JSON report from output_dir or seed initial mock data."""
+def _load_or_init_state(output_dir: Path, settings: Settings) -> AppState:
+    """Load persisted live JSON report from output_dir if valid; never auto-seed fake mocks."""
     seed_default_channels(settings.DB_PATH, settings.DEFAULT_TG_CHANNELS)
     state = AppState(output_dir=output_dir, settings=settings)
     json_path = output_dir / "spy_report.json"
@@ -196,19 +157,19 @@ def _load_or_seed_state(output_dir: Path, settings: Settings) -> AppState:
             raw = json.loads(json_path.read_text(encoding="utf-8"))
             if isinstance(raw, list) and raw:
                 loaded = [AnalyzedProductReport.model_validate(item) for item in raw]
-                if all(r.economics is not None for r in loaded):
-                    state.products = loaded
+                live_only = [r for r in loaded if r.ad.is_live]
+                if live_only:
+                    state.products = live_only
                     csv_path = output_dir / "spy_report.csv"
-                    if not csv_path.exists():
-                        state.exported = export_reports(state.products, output_dir=output_dir)
-                    else:
+                    if csv_path.exists():
                         state.exported = {"csv": str(csv_path), "json": str(json_path)}
+                    else:
+                        state.exported = export_reports(state.products, output_dir=output_dir)
                     return state
         except Exception as exc:
             logger.warning("Failed to load existing report %s: %s", json_path, exc)
 
-    state.products = _build_initial_mock_reports(settings)
-    state.exported = export_reports(state.products, output_dir=output_dir)
+    state.exported = export_reports([], output_dir=output_dir)
     return state
 
 
@@ -216,11 +177,13 @@ def _compute_summary(products: list[AnalyzedProductReport]) -> dict[str, Any]:
     """Compute aggregate KPI metrics across analyzed offers."""
     total = len(products)
     winners = sum(1 for p in products if p.margin.is_winner)
+    live_count = sum(1 for p in products if p.ad.is_live)
     margins = [p.margin.net_margin_usd for p in products]
     pis = [p.margin.profitability_index for p in products]
     scores = [p.economics.opportunity_score for p in products if p.economics is not None]
     return {
         "total": total,
+        "live_count": live_count,
         "winners": winners,
         "non_winners": total - winners,
         "avg_net_margin_usd": round(sum(margins) / total, 2) if total else 0.0,
@@ -231,14 +194,72 @@ def _compute_summary(products: list[AnalyzedProductReport]) -> dict[str, Any]:
     }
 
 
+def _serialize_product(p: AnalyzedProductReport) -> dict[str, Any]:
+    """Serialize AnalyzedProductReport with convenience top-level gallery fields."""
+    data = p.model_dump(mode="json")
+    best = p.best_supplier or (p.suppliers[0] if p.suppliers else None)
+    ali_sup = next((s for s in p.suppliers if s.source == "aliexpress"), best)
+    prom_sig = next((s for s in p.marketplace_signals if s.platform == "prom_ua" and s.top_sample_url), None)
+    olx_sig = next((s for s in p.marketplace_signals if s.platform in ("olx_ua", "olx_pl") and s.top_sample_url), None)
+
+    image_url = p.landing.image_url or p.ad.ad_creative_image_url or (best.image_url if best else "") or ""
+    product_url = p.landing.final_url or p.landing.url or p.ad.landing_url
+    data.update({
+        "image_url": image_url,
+        "product_url": product_url,
+        "ali_url": ali_sup.product_url if ali_sup else None,
+        "prom_url": product_url if p.ad.source == "prom_ua" else (prom_sig.top_sample_url if prom_sig else None),
+        "olx_url": product_url if p.ad.source in ("olx_ua", "olx_pl") else (olx_sig.top_sample_url if olx_sig else None),
+        "sold_text": ali_sup.sales_count_text if ali_sup else "",
+        "rating": ali_sup.rating if ali_sup else None,
+        "source": p.ad.source,
+        "is_live": p.ad.is_live,
+    })
+    return data
+
+
 def _serialize_report_payload(state: AppState) -> dict[str, Any]:
-    """Build API report payload containing metadata, summary KPIs, and products."""
+    """Build API report payload containing metadata, summary KPIs, diagnostics, and products."""
     return {
         "meta": state.last_scan_meta,
         "summary": _compute_summary(state.products),
         "exported": state.exported,
-        "products": [p.model_dump(mode="json") for p in state.products],
+        "source_diagnostics": state.source_diagnostics,
+        "trending_keywords": state.trending_keywords,
+        "external_blocks": state.external_blocks,
+        "curated_categories": CURATED_CATEGORIES,
+        "products": [_serialize_product(p) for p in state.products],
     }
+
+
+def _validate_public_image_url(raw_url: str) -> str:
+    """Validate http/https image URL and reject private/loopback/link-local/reserved IPs."""
+    parsed = urlparse(raw_url.strip())
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise HTTPException(status_code=400, detail="Only http/https image URLs are allowed")
+
+    host = parsed.hostname
+    try:
+        addr_info = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=400, detail=f"DNS resolution failed: {exc}") from exc
+
+    if not addr_info:
+        raise HTTPException(status_code=400, detail="No IP addresses resolved for host")
+
+    for entry in addr_info:
+        ip_str = entry[4][0].split("%")[0]
+        ip_obj = ipaddress.ip_address(ip_str)
+        if (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_reserved
+            or ip_obj.is_multicast
+            or ip_obj.is_unspecified
+        ):
+            raise HTTPException(status_code=403, detail="Blocked non-public image host")
+    return raw_url.strip()
 
 
 def create_app(
@@ -248,9 +269,9 @@ def create_app(
     """Create the FastAPI web application wrapped with /spy subpath middleware."""
     active_settings = settings or get_settings()
     resolved_dir = Path(output_dir) if output_dir is not None else Path(active_settings.EXPORT_DIR)
-    state = _load_or_seed_state(resolved_dir, active_settings)
+    state = _load_or_init_state(resolved_dir, active_settings)
 
-    fastapi_app = FastAPI(title="TovarSpy", version="2.0.0")
+    fastapi_app = FastAPI(title="TovarSpy", version="3.0.0")
 
     @fastapi_app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
@@ -286,18 +307,78 @@ def create_app(
             "marketplace_fee_pct": s.MARKETPLACE_FEE_PCT,
             "payment_fee_pct": s.PAYMENT_FEE_PCT,
             "fx_rates_to_usd": s.FX_RATES_TO_USD,
-            "available_sources": ["meta", "adheart", "tiktok"],
-            "public_marketplaces": ["olx_ua", "prom_ua", "allegro_pl", "olx_pl", "amazon_us"],
+            "available_sources": ["aliexpress", "prom_ua", "olx_ua", "olx_pl", "telegram", "meta", "tiktok"],
+            "curated_categories": CURATED_CATEGORIES,
+            "external_blocks": state.external_blocks,
             "proxy_configured": bool(s.PROXY_URL.strip()),
             "telegram_configured": bool(s.TELEGRAM_BOT_TOKEN and s.TELEGRAM_CHAT_ID),
         }
+
+    @fastapi_app.get("/api/img")
+    async def proxy_image(url: str = Query(..., min_length=8)) -> Response:
+        safe_url = _validate_public_image_url(url)
+        now = time.time()
+        cached = state.img_cache.get(safe_url)
+        if cached is not None:
+            ts, img_bytes, ctype = cached
+            if (now - ts) <= _IMG_CACHE_TTL:
+                state.img_cache.move_to_end(safe_url)
+                return Response(
+                    content=img_bytes,
+                    media_type=ctype,
+                    headers={"Cache-Control": f"public, max-age={_IMG_CACHE_TTL}"},
+                )
+            state.img_cache.pop(safe_url, None)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=8.0,
+                follow_redirects=True,
+                proxy=get_httpx_proxy(state.settings),
+            ) as client:
+                async with client.stream("GET", safe_url, headers=headers) as resp:
+                    if resp.status_code != 200:
+                        raise HTTPException(status_code=502, detail=f"Upstream image HTTP {resp.status_code}")
+                    ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+                    if ctype not in _ALLOWED_IMAGE_TYPES:
+                        raise HTTPException(status_code=415, detail=f"Unsupported content-type: {ctype or 'unknown'}")
+
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in resp.aiter_bytes():
+                        total += len(chunk)
+                        if total > _MAX_IMAGE_BYTES:
+                            raise HTTPException(status_code=413, detail="Image exceeds 4 MB limit")
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
+        except HTTPException:
+            raise
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Image fetch failed: {exc}") from exc
+
+        if len(state.img_cache) >= _IMG_CACHE_MAX:
+            state.img_cache.popitem(last=False)
+        state.img_cache[safe_url] = (now, body, ctype)
+        return Response(
+            content=body,
+            media_type=ctype,
+            headers={"Cache-Control": f"public, max-age={_IMG_CACHE_TTL}"},
+        )
+
+    @fastapi_app.get("/api/trends")
+    async def get_trends(geo: str = "UA") -> dict[str, Any]:
+        trends = await fetch_google_trends_rss(geo=geo, settings=state.settings)
+        return {"geo": geo.upper(), "trends": trends}
 
     @fastapi_app.get("/api/report")
     async def get_report() -> dict[str, Any]:
         return _serialize_report_payload(state)
 
-    @fastapi_app.post("/api/scan")
-    async def run_scan(req: ScanRequest) -> dict[str, Any]:
+    async def _execute_scan_or_super(req: ScanRequest, force_super: bool = False) -> dict[str, Any]:
         scan_settings = state.settings.model_copy(deep=True)
         if req.min_duration_days is not None:
             scan_settings.MIN_DURATION_DAYS = req.min_duration_days
@@ -312,29 +393,57 @@ def create_app(
         if req.proxy_url is not None:
             scan_settings.PROXY_URL = req.proxy_url.strip()
 
+        use_mock = req.use_mock if req.use_mock is not None else req.mock
         countries = [c.strip().upper() for c in req.countries if c.strip()] if req.countries else None
-        sources = [s.strip().lower() for s in req.sources if s.strip()] if req.sources else None
 
-        reports, exported = await run_pipeline(
-            query=req.query,
-            countries=countries,
-            sources=sources,
-            output_dir=state.output_dir,
-            mock=req.mock,
-            send_alerts=req.send_alerts,
-            settings=scan_settings,
-        )
-        state.settings = scan_settings
-        state.products = reports
-        state.exported = exported
+        if force_super or req.super_parse or req.categories is not None or (not use_mock and not req.sources):
+            res = await run_super_parse(
+                query=req.query,
+                categories=req.categories,
+                countries=countries,
+                geo_trends=req.geo,
+                output_dir=state.output_dir,
+                mock=use_mock,
+                settings=scan_settings,
+            )
+            state.settings = scan_settings
+            state.products = res["reports"]
+            state.exported = res["exported"]
+            state.source_diagnostics = res["source_diagnostics"]
+            state.trending_keywords = res["trending_keywords"]
+            state.external_blocks = res["external_blocks"]
+        else:
+            sources = [s.strip().lower() for s in req.sources if s.strip()] if req.sources else None
+            reports, exported = await run_pipeline(
+                query=req.query,
+                countries=countries,
+                sources=sources,
+                output_dir=state.output_dir,
+                mock=use_mock,
+                send_alerts=req.send_alerts,
+                settings=scan_settings,
+            )
+            state.settings = scan_settings
+            state.products = reports
+            state.exported = exported
+            state.source_diagnostics = {"demo": f"mock: {len(reports)} items"} if use_mock else {}
+
         state.last_scan_meta = {
             "query": req.query,
             "countries": countries or list(scan_settings.TARGET_COUNTRIES),
-            "sources": sources or ["meta", "adheart", "tiktok"],
-            "mock": req.mock,
+            "categories": req.categories or list(CURATED_CATEGORIES.keys()),
+            "mock": use_mock,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         return _serialize_report_payload(state)
+
+    @fastapi_app.post("/api/scan")
+    async def run_scan(req: ScanRequest) -> dict[str, Any]:
+        return await _execute_scan_or_super(req, force_super=False)
+
+    @fastapi_app.post("/api/super-parse")
+    async def super_parse(req: ScanRequest) -> dict[str, Any]:
+        return await _execute_scan_or_super(req, force_super=True)
 
     @fastapi_app.get("/api/scans")
     async def get_scan_history() -> dict[str, Any]:
