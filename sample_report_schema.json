@@ -367,7 +367,7 @@
       "type": "object"
     },
     "SupplierOffer": {
-      "description": "Matched 1688.com wholesale supplier offer.",
+      "description": "Matched 1688.com / Alibaba / AliExpress wholesale supplier offer.",
       "properties": {
         "supplier_name": {
           "title": "Supplier Name",
@@ -435,6 +435,11 @@
           ],
           "default": null,
           "title": "Image Url"
+        },
+        "source": {
+          "default": "1688",
+          "title": "Source",
+          "type": "string"
         }
       },
       "required": [
@@ -490,6 +495,11 @@
           "minimum": 0,
           "title": "Rrc Price Usd",
           "type": "number"
+        },
+        "in_stock": {
+          "default": true,
+          "title": "In Stock",
+          "type": "boolean"
         },
         "supplier_contact": {
           "default": "",

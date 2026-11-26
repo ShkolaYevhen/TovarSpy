@@ -90,7 +90,7 @@ class LandingPageData(BaseModel):
 
 
 class SupplierOffer(BaseModel):
-    """Matched 1688.com wholesale supplier offer."""
+    """Matched 1688.com / Alibaba / AliExpress wholesale supplier offer."""
 
     supplier_name: str
     product_title: str
@@ -101,6 +101,7 @@ class SupplierOffer(BaseModel):
     years_on_1688: Optional[int] = Field(default=None, ge=0)
     moq: int = Field(default=1, ge=1)
     image_url: Optional[str] = None
+    source: str = "1688"
 
 
 class MarginResult(BaseModel):
@@ -162,6 +163,7 @@ class TelegramDropOffer(BaseModel):
     rrc_price_uah: float = Field(default=0.0, ge=0)
     drop_price_usd: float = Field(default=0.0, ge=0)
     rrc_price_usd: float = Field(default=0.0, ge=0)
+    in_stock: bool = True
     supplier_contact: str = ""
 
 
