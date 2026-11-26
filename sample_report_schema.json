@@ -60,6 +60,64 @@
       "title": "AdRecord",
       "type": "object"
     },
+    "CoFounderEconomics": {
+      "description": "Dual unit economics (UA COD vs Cross-border) and composite opportunity score.",
+      "properties": {
+        "ua_cod_net_profit_usd": {
+          "default": 0.0,
+          "title": "Ua Cod Net Profit Usd",
+          "type": "number"
+        },
+        "ua_cod_roi_pct": {
+          "default": 0.0,
+          "title": "Ua Cod Roi Pct",
+          "type": "number"
+        },
+        "ua_return_drag_usd": {
+          "default": 0.0,
+          "title": "Ua Return Drag Usd",
+          "type": "number"
+        },
+        "cross_border_net_profit_usd": {
+          "default": 0.0,
+          "title": "Cross Border Net Profit Usd",
+          "type": "number"
+        },
+        "cross_border_roi_pct": {
+          "default": 0.0,
+          "title": "Cross Border Roi Pct",
+          "type": "number"
+        },
+        "demand_velocity_score": {
+          "default": 0.0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Demand Velocity Score",
+          "type": "number"
+        },
+        "competition_score": {
+          "default": 0.0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Competition Score",
+          "type": "number"
+        },
+        "opportunity_score": {
+          "default": 0.0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Opportunity Score",
+          "type": "number"
+        },
+        "recommended_model": {
+          "default": "cross_border",
+          "title": "Recommended Model",
+          "type": "string"
+        }
+      },
+      "title": "CoFounderEconomics",
+      "type": "object"
+    },
     "LandingPageData": {
       "description": "Extracted product metadata and platform fingerprint from a landing page.",
       "properties": {
@@ -186,6 +244,81 @@
       "title": "MarginResult",
       "type": "object"
     },
+    "MarketplaceSignal": {
+      "description": "Public marketplace demand, pricing, and seller saturation snapshot.",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "country": {
+          "title": "Country",
+          "type": "string"
+        },
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "listing_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Listing Count",
+          "type": "integer"
+        },
+        "sold_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sold Count",
+          "type": "integer"
+        },
+        "median_price": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Median Price",
+          "type": "number"
+        },
+        "currency": {
+          "default": "USD",
+          "title": "Currency",
+          "type": "string"
+        },
+        "median_price_usd": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Median Price Usd",
+          "type": "number"
+        },
+        "seller_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Seller Count",
+          "type": "integer"
+        },
+        "review_velocity": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Review Velocity",
+          "type": "number"
+        },
+        "blocked": {
+          "default": false,
+          "title": "Blocked",
+          "type": "boolean"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "country",
+        "query"
+      ],
+      "title": "MarketplaceSignal",
+      "type": "object"
+    },
     "SupplierOffer": {
       "description": "Matched 1688.com wholesale supplier offer.",
       "properties": {
@@ -266,6 +399,64 @@
       ],
       "title": "SupplierOffer",
       "type": "object"
+    },
+    "TelegramDropOffer": {
+      "description": "Wholesale dropship offer parsed from a public Ukrainian Telegram channel.",
+      "properties": {
+        "channel": {
+          "title": "Channel",
+          "type": "string"
+        },
+        "post_url": {
+          "title": "Post Url",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "image_url": {
+          "default": "",
+          "title": "Image Url",
+          "type": "string"
+        },
+        "drop_price_uah": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Drop Price Uah",
+          "type": "number"
+        },
+        "rrc_price_uah": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Rrc Price Uah",
+          "type": "number"
+        },
+        "drop_price_usd": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Drop Price Usd",
+          "type": "number"
+        },
+        "rrc_price_usd": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Rrc Price Usd",
+          "type": "number"
+        },
+        "supplier_contact": {
+          "default": "",
+          "title": "Supplier Contact",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "post_url",
+        "title"
+      ],
+      "title": "TelegramDropOffer",
+      "type": "object"
     }
   },
   "description": "Complete end-to-end analysis report for a single ad/product candidate.",
@@ -296,6 +487,31 @@
     },
     "margin": {
       "$ref": "#/$defs/MarginResult"
+    },
+    "marketplace_signals": {
+      "items": {
+        "$ref": "#/$defs/MarketplaceSignal"
+      },
+      "title": "Marketplace Signals",
+      "type": "array"
+    },
+    "tg_offers": {
+      "items": {
+        "$ref": "#/$defs/TelegramDropOffer"
+      },
+      "title": "Tg Offers",
+      "type": "array"
+    },
+    "economics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CoFounderEconomics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "analyzed_at": {
       "format": "date-time",
