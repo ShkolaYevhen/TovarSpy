@@ -248,10 +248,17 @@
       "description": "Public marketplace demand, pricing, and seller saturation snapshot.",
       "properties": {
         "source": {
+          "default": "",
           "title": "Source",
           "type": "string"
         },
+        "platform": {
+          "default": "",
+          "title": "Platform",
+          "type": "string"
+        },
         "country": {
+          "default": "",
           "title": "Country",
           "type": "string"
         },
@@ -277,6 +284,18 @@
           "title": "Median Price",
           "type": "number"
         },
+        "min_price": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Min Price",
+          "type": "number"
+        },
+        "max_price": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Max Price",
+          "type": "number"
+        },
         "currency": {
           "default": "USD",
           "title": "Currency",
@@ -287,6 +306,19 @@
           "minimum": 0,
           "title": "Median Price Usd",
           "type": "number"
+        },
+        "sold_velocity_score": {
+          "default": 0.0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Sold Velocity Score",
+          "type": "number"
+        },
+        "seller_density": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Seller Density",
+          "type": "integer"
         },
         "seller_count": {
           "default": 0,
@@ -300,6 +332,23 @@
           "title": "Review Velocity",
           "type": "number"
         },
+        "top_sample_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top Sample Url"
+        },
+        "status": {
+          "default": "empty",
+          "title": "Status",
+          "type": "string"
+        },
         "blocked": {
           "default": false,
           "title": "Blocked",
@@ -312,8 +361,6 @@
         }
       },
       "required": [
-        "source",
-        "country",
         "query"
       ],
       "title": "MarketplaceSignal",

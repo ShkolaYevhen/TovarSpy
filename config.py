@@ -118,18 +118,37 @@ class MarginResult(BaseModel):
 class MarketplaceSignal(BaseModel):
     """Public marketplace demand, pricing, and seller saturation snapshot."""
 
-    source: str
-    country: str
+    source: str = ""
+    platform: str = ""
+    country: str = ""
     query: str
     listing_count: int = Field(default=0, ge=0)
     sold_count: int = Field(default=0, ge=0)
     median_price: float = Field(default=0.0, ge=0)
+    min_price: float = Field(default=0.0, ge=0)
+    max_price: float = Field(default=0.0, ge=0)
     currency: str = "USD"
     median_price_usd: float = Field(default=0.0, ge=0)
+    sold_velocity_score: float = Field(default=0.0, ge=0, le=100)
+    seller_density: int = Field(default=0, ge=0)
     seller_count: int = Field(default=0, ge=0)
     review_velocity: float = Field(default=0.0, ge=0)
+    top_sample_url: Optional[str] = None
+    status: str = "empty"
     blocked: bool = False
     note: str = ""
+
+
+class MarketplaceIntelReport(BaseModel):
+    """Aggregated marketplace demand, saturation, and regional pricing report."""
+
+    query: str
+    signals: list[MarketplaceSignal] = Field(default_factory=list)
+    demand_velocity_score: float = Field(default=0.0, ge=0, le=100)
+    saturation_score: float = Field(default=0.0, ge=0, le=100)
+    ua_median_price_uah: Optional[float] = None
+    pl_median_price_pln: Optional[float] = None
+    us_median_price_usd: Optional[float] = None
 
 
 class TelegramDropOffer(BaseModel):
