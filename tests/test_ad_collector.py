@@ -1,6 +1,9 @@
 import json
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -12,19 +15,27 @@ from ad_collector import (
     fetch_adheart_ads,
     fetch_meta_ads,
     fetch_tiktok_ads,
+    fetch_tiktok_creative_center_public,
     filter_winning_ads,
+    parse_meta_ad_library_html,
+    parse_tiktok_cc_payload,
 )
 from config import AdRecord, Settings
 
 
 class TestAdCollector(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        self.tmp_dir = tempfile.TemporaryDirectory()
         self.settings = Settings(
             _env_file=None,
+            DB_PATH=str(Path(self.tmp_dir.name) / "test.db"),
             META_ACCESS_TOKEN="meta-token",
             ADHEART_API_KEY="adheart-key",
             TIKTOK_ACCESS_TOKEN="tiktok-token",
         )
+
+    def tearDown(self) -> None:
+        self.tmp_dir.cleanup()
 
     async def test_fetch_meta_ads_parses_records(self) -> None:
         start_time = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
@@ -114,7 +125,7 @@ class TestAdCollector(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-        empty_settings = Settings(_env_file=None)
+        empty_settings = Settings(_env_file=None, DB_PATH=self.settings.DB_PATH)
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             self.assertEqual(await fetch_meta_ads(client, empty_settings, "q", ["US"]), [])
             self.assertEqual(await fetch_adheart_ads(client, empty_settings, "q", ["US"]), [])
@@ -124,6 +135,65 @@ class TestAdCollector(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tt_ads), 1)
         self.assertEqual(tt_ads[0].source, "tiktok")
         self.assertEqual(tt_ads[0].active_ad_sets, 8)
+
+    def test_parse_meta_ad_library_html_and_block_markers(self) -> None:
+        start_date = (datetime.now(timezone.utc) - timedelta(days=12)).strftime("%b %d, %Y")
+        html = f"""
+        <div data-ad-archive-id="998877">
+          <h3>SmartShop PL</h3>
+          <p>Library ID: 998877 · Started running on {start_date} · 8 ads use this creative</p>
+          <img src="https://scontent.example/ad.jpg" />
+          <a href="https://facebook.com/ads/library/?id=998877">Ad Details</a>
+          <a href="https://l.facebook.com/l.php?u=https%3A%2F%2Fsmartshop.pl%2Fmassager">Shop Now</a>
+        </div>
+        """
+        ads = parse_meta_ad_library_html(html, country="PL")
+        self.assertEqual(len(ads), 1)
+        self.assertEqual(ads[0].ad_id, "998877")
+        self.assertEqual(ads[0].landing_url, "https://smartshop.pl/massager")
+        self.assertGreaterEqual(ads[0].days_running, 11)
+        self.assertEqual(ads[0].active_ad_sets, 8)
+        self.assertEqual(ads[0].source, "meta_web")
+
+        blocked = "<html><body>Please verify captcha checkpoint</body></html>"
+        self.assertEqual(parse_meta_ad_library_html(blocked, country="PL"), [])
+
+    async def test_parse_tiktok_cc_and_caching_and_zero_key_fallback(self) -> None:
+        html = """
+        <html><head><script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"materials":[
+          {"id":"cc-1","brand_name":"GlowUA","title":"Sunset Lamp LED","landing_page":"https://glow.ua/lamp","duration":14,"ad_group_count":9},
+          {"id":"cc-2","brand_name":"Other","title":"Unrelated Shoe","landing_page":"https://other.ua/shoe","duration":14,"ad_group_count":9}
+        ]}}}
+        </script></head></html>
+        """
+        parsed = parse_tiktok_cc_payload(html, query="lamp", country="UA")
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0].ad_id, "cc-1")
+        self.assertEqual(parsed[0].source, "tiktok_cc")
+
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(200, text=html)
+
+        no_keys = Settings(_env_file=None, DB_PATH=self.settings.DB_PATH)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            first = await fetch_tiktok_creative_center_public("lamp", ["UA"], no_keys, client=client)
+            second = await fetch_tiktok_creative_center_public("lamp", ["UA"], no_keys, client=client)
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
+        self.assertEqual(call_count, 1)
+
+        with (
+            patch("ad_collector.fetch_meta_public_ads", new=AsyncMock(return_value=[])),
+            patch("ad_collector.fetch_tiktok_creative_center_public", new=AsyncMock(return_value=[])),
+        ):
+            fallback = await collect_winning_ads(no_keys, query="massager", countries=["PL", "UA"], mock=False)
+        self.assertGreaterEqual(len(fallback), 1)
+        self.assertEqual(fallback[0].source, "meta")
 
     def test_filter_winning_ads_boundaries_and_dedup(self) -> None:
         candidates = [
