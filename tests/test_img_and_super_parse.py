@@ -66,6 +66,18 @@ class TestImgProxyAndSuperParse(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r2.content, b"\xff\xd8\xff\xe0TESTJPG")
             self.assertEqual(fetch_count, 1)
 
+        # Serve JPEG sent with binary/octet-stream (Backblaze B2 / Tyver CDN pattern)
+        def octet_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, headers={"content-type": "binary/octet-stream"}, content=b"\xff\xd8\xff\xe0B2JPG")
+
+        with (
+            patch("web_app.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 0))]),
+            patch("web_app.httpx.AsyncClient", return_value=httpx.AsyncClient(transport=httpx.MockTransport(octet_handler))),
+        ):
+            r3 = self.client.get("/spy/api/img?url=https://tyver-may26-img-1.s3.example.com/ad.jpg")
+            self.assertEqual(r3.status_code, 200)
+            self.assertEqual(r3.headers["content-type"], "image/jpeg")
+
     async def test_run_super_parse_and_endpoint_live_wiring(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             host = request.url.host

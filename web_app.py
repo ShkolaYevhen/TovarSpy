@@ -36,6 +36,22 @@ logger = logging.getLogger(__name__)
 
 STATIC_INDEX_PATH = Path(__file__).resolve().parent / "static" / "index.html"
 _ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/avif"}
+_OCTET_TYPES = {"binary/octet-stream", "application/octet-stream", ""}
+
+
+def _sniff_image_content_type(data: bytes) -> Optional[str]:
+    """Detect raster image MIME type from magic bytes when upstream sends octet-stream."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if len(data) >= 12 and data[4:12] == b"ftypavif":
+        return "image/avif"
+    return None
 _MAX_IMAGE_BYTES = 4 * 1024 * 1024
 _IMG_CACHE_TTL = 3600
 _IMG_CACHE_MAX = 128
@@ -463,7 +479,8 @@ def create_app(
                     if resp.status_code != 200:
                         raise HTTPException(status_code=502, detail=f"Upstream image HTTP {resp.status_code}")
                     ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
-                    if ctype not in _ALLOWED_IMAGE_TYPES:
+                    is_octet = ctype in _OCTET_TYPES
+                    if not is_octet and ctype not in _ALLOWED_IMAGE_TYPES:
                         raise HTTPException(status_code=415, detail=f"Unsupported content-type: {ctype or 'unknown'}")
 
                     chunks: list[bytes] = []
@@ -474,6 +491,11 @@ def create_app(
                             raise HTTPException(status_code=413, detail="Image exceeds 4 MB limit")
                         chunks.append(chunk)
                     body = b"".join(chunks)
+                    if is_octet:
+                        sniffed = _sniff_image_content_type(body)
+                        if not sniffed:
+                            raise HTTPException(status_code=415, detail="Unsupported binary image payload")
+                        ctype = sniffed
         except HTTPException:
             raise
         except httpx.HTTPError as exc:
