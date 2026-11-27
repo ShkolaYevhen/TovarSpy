@@ -30,6 +30,7 @@ from storage import (
     upsert_tg_channel,
     upsert_watchlist,
 )
+from tyver_client import fetch_tyver_ai_filters, fetch_tyver_creatives, fetch_tyver_quota
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class ScanRequest(BaseModel):
     geo: str = "UA"
     mock: bool = False
     use_mock: Optional[bool] = None
+    skip_china: Optional[bool] = None
     send_alerts: bool = False
     proxy_url: Optional[str] = None
     min_duration_days: Optional[int] = Field(default=None, ge=0)
@@ -80,6 +82,26 @@ class ScanRequest(BaseModel):
     shipping_cost_est_usd: Optional[float] = Field(default=None, ge=0)
     est_cpa_usd: Optional[float] = Field(default=None, ge=0)
     winner_net_margin_usd: Optional[float] = None
+
+
+class TyverSearchRequest(BaseModel):
+    """Query payload for Tyver.io iGaming & UA e-com ad creative spy."""
+
+    mode: Literal["igaming", "ecom_ua"] = "igaming"
+    query: str = ""
+    countries: Optional[list[str]] = None
+    ai_category: Optional[str] = None
+    ai_angle: Optional[str] = None
+    ai_gambling_game_type: Optional[str] = None
+    activity_days_amount_gte: Optional[int] = Field(default=None, ge=0)
+    cta: Optional[str] = None
+    cta_button: Optional[str] = None
+    cms: Optional[str] = None
+    landing_cms: Optional[str] = None
+    sort: str = "activity_days_amount"
+    cursor: Optional[str] = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=24, ge=1, le=60)
 
 
 class AlertRequest(BaseModel):
@@ -140,8 +162,9 @@ class AppState:
         self.img_cache: OrderedDict[str, tuple[float, bytes, str]] = OrderedDict()
         self.last_scan_meta: dict[str, Any] = {
             "query": "",
-            "countries": list(settings.TARGET_COUNTRIES),
-            "sources": ["aliexpress", "prom_ua", "olx_ua", "olx_pl"],
+            "countries": ["UA"] if settings.SKIP_CHINA_SOURCING else list(settings.TARGET_COUNTRIES),
+            "sources": ["prom_ua", "prom_wholesale", "olx_ua", "olx_opt", "bigl_ua"],
+            "skip_china": settings.SKIP_CHINA_SOURCING,
             "mock": False,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -194,24 +217,42 @@ def _compute_summary(products: list[AnalyzedProductReport]) -> dict[str, Any]:
     }
 
 
-def _serialize_product(p: AnalyzedProductReport) -> dict[str, Any]:
-    """Serialize AnalyzedProductReport with convenience top-level gallery fields."""
+def _serialize_product(p: AnalyzedProductReport, settings: Optional[Settings] = None) -> dict[str, Any]:
+    """Serialize AnalyzedProductReport with convenience top-level gallery & UA wholesale fields."""
     data = p.model_dump(mode="json")
     best = p.best_supplier or (p.suppliers[0] if p.suppliers else None)
-    ali_sup = next((s for s in p.suppliers if s.source == "aliexpress"), best)
+    ali_sup = next((s for s in p.suppliers if s.source == "aliexpress"), None)
+    ua_ws_sup = next((s for s in p.suppliers if s.source in ("prom_wholesale", "olx_opt", "bigl_ua")), best)
     prom_sig = next((s for s in p.marketplace_signals if s.platform == "prom_ua" and s.top_sample_url), None)
     olx_sig = next((s for s in p.marketplace_signals if s.platform in ("olx_ua", "olx_pl") and s.top_sample_url), None)
 
     image_url = p.landing.image_url or p.ad.ad_creative_image_url or (best.image_url if best else "") or ""
     product_url = p.landing.final_url or p.landing.url or p.ad.landing_url
+    usd_to_uah = getattr(settings, "USD_TO_UAH", 41.67) if settings else 41.67
+    ws_uah = (
+        (ua_ws_sup.wholesale_price_uah if ua_ws_sup else None)
+        or (p.economics.ua_wholesale_price_uah if p.economics else None)
+        or round(p.margin.china_wholesale_price_usd * usd_to_uah, 2)
+    )
+    retail_uah = (
+        (p.landing.price if p.landing.currency == "UAH" and p.landing.price else None)
+        or (p.economics.ua_retail_price_uah if p.economics else None)
+        or round(p.margin.retail_price_usd * usd_to_uah, 2)
+    )
     data.update({
         "image_url": image_url,
         "product_url": product_url,
-        "ali_url": ali_sup.product_url if ali_sup else None,
+        "supplier_url": ua_ws_sup.product_url if ua_ws_sup else (best.product_url if best else None),
+        "ali_url": None if (settings and settings.SKIP_CHINA_SOURCING) else (ali_sup.product_url if ali_sup else None),
         "prom_url": product_url if p.ad.source == "prom_ua" else (prom_sig.top_sample_url if prom_sig else None),
-        "olx_url": product_url if p.ad.source in ("olx_ua", "olx_pl") else (olx_sig.top_sample_url if olx_sig else None),
-        "sold_text": ali_sup.sales_count_text if ali_sup else "",
-        "rating": ali_sup.rating if ali_sup else None,
+        "prom_wholesale_url": next((s.product_url for s in p.suppliers if s.source == "prom_wholesale"), None),
+        "bigl_url": next((s.product_url for s in p.suppliers if s.source == "bigl_ua"), None),
+        "olx_url": product_url if p.ad.source in ("olx_ua", "olx_opt", "olx_pl") else (olx_sig.top_sample_url if olx_sig else None),
+        "wholesale_uah": round(float(ws_uah or 0.0), 2),
+        "retail_uah": round(float(retail_uah or 0.0), 2),
+        "ua_net_profit_uah": p.economics.ua_net_profit_uah if p.economics else round(p.margin.net_margin_usd * usd_to_uah, 2),
+        "sold_text": ua_ws_sup.sales_count_text if ua_ws_sup else (best.sales_count_text if best else ""),
+        "rating": best.rating if best else None,
         "source": p.ad.source,
         "is_live": p.ad.is_live,
     })
@@ -228,7 +269,7 @@ def _serialize_report_payload(state: AppState) -> dict[str, Any]:
         "trending_keywords": state.trending_keywords,
         "external_blocks": state.external_blocks,
         "curated_categories": CURATED_CATEGORIES,
-        "products": [_serialize_product(p) for p in state.products],
+        "products": [_serialize_product(p, settings=state.settings) for p in state.products],
     }
 
 
@@ -304,15 +345,93 @@ def create_app(
             "ua_cod_return_rate": s.UA_COD_RETURN_RATE,
             "ua_nova_poshta_return_fee_usd": s.UA_NOVA_POSHTA_RETURN_FEE_USD,
             "ua_cpa_usd": s.UA_CPA_USD,
+            "usd_to_uah": s.USD_TO_UAH,
+            "skip_china_sourcing": s.SKIP_CHINA_SOURCING,
             "marketplace_fee_pct": s.MARKETPLACE_FEE_PCT,
             "payment_fee_pct": s.PAYMENT_FEE_PCT,
             "fx_rates_to_usd": s.FX_RATES_TO_USD,
-            "available_sources": ["aliexpress", "prom_ua", "olx_ua", "olx_pl", "telegram", "meta", "tiktok"],
+            "available_sources": ["prom_ua", "prom_wholesale", "olx_ua", "olx_opt", "bigl_ua", "telegram", "tyver"],
             "curated_categories": CURATED_CATEGORIES,
             "external_blocks": state.external_blocks,
             "proxy_configured": bool(s.PROXY_URL.strip()),
+            "tyver_configured": bool((s.TYVER_API_KEY or "").strip()),
             "telegram_configured": bool(s.TELEGRAM_BOT_TOKEN and s.TELEGRAM_CHAT_ID),
         }
+
+    @fastapi_app.get("/api/tyver/quota")
+    async def tyver_quota() -> dict[str, Any]:
+        return await fetch_tyver_quota(
+            state.settings.TYVER_API_KEY or "",
+            proxy=get_httpx_proxy(state.settings),
+        )
+
+    @fastapi_app.get("/api/tyver/filters")
+    async def tyver_filters() -> dict[str, Any]:
+        return await fetch_tyver_ai_filters(
+            state.settings.TYVER_API_KEY or "",
+            proxy=get_httpx_proxy(state.settings),
+        )
+
+    async def _run_tyver_search(req: TyverSearchRequest) -> dict[str, Any]:
+        api_key = (state.settings.TYVER_API_KEY or "").strip()
+        proxy = get_httpx_proxy(state.settings)
+        res = await fetch_tyver_creatives(
+            api_key=api_key,
+            mode=req.mode,
+            query=req.query,
+            countries=req.countries,
+            ai_category=req.ai_category,
+            ai_angle=req.ai_angle,
+            ai_gambling_game_type=req.ai_gambling_game_type,
+            activity_days_amount_gte=req.activity_days_amount_gte,
+            cta=req.cta or req.cta_button,
+            cms=req.cms or req.landing_cms,
+            sort=req.sort,
+            cursor=req.cursor,
+            page=req.page,
+            page_size=req.page_size,
+            proxy=proxy,
+        )
+        quota = await fetch_tyver_quota(api_key, proxy=proxy)
+        return {**res, "quota": quota}
+
+    @fastapi_app.post("/api/tyver/search")
+    async def tyver_search_post(req: TyverSearchRequest) -> dict[str, Any]:
+        return await _run_tyver_search(req)
+
+    @fastapi_app.get("/api/tyver/search")
+    async def tyver_search_get(
+        mode: Literal["igaming", "ecom_ua"] = "igaming",
+        query: str = "",
+        countries: Optional[str] = None,
+        ai_category: Optional[str] = None,
+        ai_angle: Optional[str] = None,
+        ai_gambling_game_type: Optional[str] = None,
+        activity_days_amount_gte: Optional[int] = Query(default=None, ge=0),
+        cta: Optional[str] = None,
+        cms: Optional[str] = None,
+        sort: str = "activity_days_amount",
+        cursor: Optional[str] = None,
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=24, ge=1, le=60),
+    ) -> dict[str, Any]:
+        parsed_countries = [c.strip().upper() for c in countries.split(",") if c.strip()] if countries else None
+        req = TyverSearchRequest(
+            mode=mode,
+            query=query,
+            countries=parsed_countries,
+            ai_category=ai_category,
+            ai_angle=ai_angle,
+            ai_gambling_game_type=ai_gambling_game_type,
+            activity_days_amount_gte=activity_days_amount_gte,
+            cta=cta,
+            cms=cms,
+            sort=sort,
+            cursor=cursor,
+            page=page,
+            page_size=page_size,
+        )
+        return await _run_tyver_search(req)
 
     @fastapi_app.get("/api/img")
     async def proxy_image(url: str = Query(..., min_length=8)) -> Response:
@@ -392,9 +511,13 @@ def create_app(
             scan_settings.WINNER_NET_MARGIN_USD = req.winner_net_margin_usd
         if req.proxy_url is not None:
             scan_settings.PROXY_URL = req.proxy_url.strip()
+        if req.skip_china is not None:
+            scan_settings.SKIP_CHINA_SOURCING = req.skip_china
 
         use_mock = req.use_mock if req.use_mock is not None else req.mock
-        countries = [c.strip().upper() for c in req.countries if c.strip()] if req.countries else None
+        countries = [c.strip().upper() for c in req.countries if c.strip()] if req.countries else (
+            ["UA"] if scan_settings.SKIP_CHINA_SOURCING else None
+        )
 
         if force_super or req.super_parse or req.categories is not None or (not use_mock and not req.sources):
             res = await run_super_parse(

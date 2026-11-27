@@ -315,14 +315,18 @@
     <div class="brand">
       <div class="brand-mark">TS</div>
       <div>
-        <div class="brand-title">TovarSpy Super-Parser</div>
-        <div class="brand-sub">Live AliExpress · Prom.ua · OLX.ua/pl · Google Trends · UA Telegram Drops</div>
+        <div class="brand-title">TovarSpy — Ukraine Wholesale &amp; Tyver Ad Spy</div>
+        <div class="brand-sub">Prom.ua Опт · OLX Опт · Bigl.ua · UA Telegram Drops · Tyver.io iGaming &amp; UA Ads</div>
       </div>
     </div>
     <div class="topbar-actions">
+      <span class="status-pill" id="tyverTopPill">
+        <span class="status-dot" id="tyverDot" style="background:var(--accent);box-shadow:0 0 8px var(--accent);"></span>
+        <span id="tyverTopText">Tyver: Checking...</span>
+      </span>
       <span class="status-pill" id="modeBadge">
         <span class="status-dot" id="modeDot"></span>
-        <span id="modeText">Live Mode</span>
+        <span id="modeText">UA Wholesale Live</span>
       </span>
       <span class="status-pill mono" id="updatedAt">Updated: —</span>
       <a class="btn btn-sm" id="exportCsvBtn" href="#">Export CSV</a>
@@ -332,8 +336,9 @@
 
   <main class="container">
     <nav class="tabs-bar">
-      <button class="tab-btn active" data-tab="radar" type="button">Visual Product Radar</button>
-      <button class="tab-btn" data-tab="simulator" type="button">Profit Simulator</button>
+      <button class="tab-btn active" data-tab="radar" type="button">🇺🇦 UA Wholesale Radar</button>
+      <button class="tab-btn" data-tab="tyver" type="button">🎰 Tyver Ad Spy / iGaming</button>
+      <button class="tab-btn" data-tab="simulator" type="button">UA COD Profit Simulator</button>
       <button class="tab-btn" data-tab="channels" type="button">UA Telegram Drops</button>
       <button class="tab-btn" data-tab="watchlist" type="button">Watchlist &amp; History</button>
     </nav>
@@ -366,22 +371,22 @@
       <!-- Super-Parser Controls -->
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Auto-Discovery Super-Parser (Real Photos, Real Prices, Real Links)</div>
+          <div class="panel-title">Ukraine Local Wholesale Super-Parser (Prom Опт · OLX Опт · Bigl · UA Retail Spread)</div>
           <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
             <label class="toggle-wrap">
               <input type="checkbox" id="toggleMock" />
               <span>Offline Demo Mode</span>
             </label>
             <button class="btn btn-sm" type="button" id="toggleThresholdsBtn">Thresholds ▾</button>
-            <button class="btn btn-sm" type="button" id="toggleBlocksBtn">External Limits ▾</button>
+            <button class="btn btn-sm" type="button" id="toggleBlocksBtn">Source Notes ▾</button>
           </div>
         </div>
 
         <div class="runner-row">
-          <input class="input" id="scanQuery" type="text" placeholder="Search keyword (leave blank to auto-parse all 6 categories)..." />
+          <input class="input" id="scanQuery" type="text" placeholder="Search UA keyword (e.g. органайзер, масажер) or blank for all 6 niches..." />
           <input class="input mono" id="scanProxy" type="text" placeholder="Optional proxy (http://user:pass@ip:port)" />
-          <button class="btn btn-primary" id="runScanBtn" type="button">Search Keyword</button>
-          <button class="btn btn-emerald" id="superParseBtn" type="button">⚡ Super Parse All Categories</button>
+          <button class="btn btn-primary" id="runScanBtn" type="button">Search UA Keyword</button>
+          <button class="btn btn-emerald" id="superParseBtn" type="button">⚡ Super Parse UA Wholesale</button>
         </div>
 
         <div class="chips-group" id="categoryChips"><span class="group-label">Categories:</span></div>
@@ -419,21 +424,23 @@
           <div class="toolbar-left">
             <input class="input" id="filterSearch" type="text" placeholder="Filter products, sellers..." style="width:220px;" />
             <select class="select" id="filterCategory" style="width:170px;"><option value="">All Categories</option></select>
-            <select class="select" id="filterSource" style="width:150px;">
-              <option value="">All Sources</option>
-              <option value="aliexpress">AliExpress</option>
-              <option value="prom_ua">Prom.ua</option>
-              <option value="olx_ua">OLX.ua</option>
-              <option value="olx_pl">OLX.pl</option>
+            <select class="select" id="filterSource" style="width:170px;">
+              <option value="">All UA Sources</option>
+              <option value="prom_wholesale">Prom.ua Опт</option>
+              <option value="olx_opt">OLX Опт/Дроп</option>
+              <option value="bigl_ua">Bigl.ua</option>
+              <option value="prom_ua">Prom.ua Retail</option>
+              <option value="olx_ua">OLX.ua Retail</option>
+              <option value="tyver">Tyver UA Ads</option>
             </select>
             <label class="toggle-wrap"><input type="checkbox" id="filterWinnersOnly" /><span>Winners Only</span></label>
           </div>
           <div class="toolbar-left">
-            <select class="select" id="sortField" style="width:185px;">
+            <select class="select" id="sortField" style="width:195px;">
               <option value="score">Sort: Opportunity Score</option>
-              <option value="margin">Sort: Cross-Border Profit</option>
-              <option value="ua">Sort: UA COD Profit</option>
-              <option value="cogs">Sort: Lowest China COGS</option>
+              <option value="ua">Sort: UA COD Net Profit</option>
+              <option value="margin">Sort: Net Margin ($)</option>
+              <option value="cogs">Sort: Lowest UA Wholesale</option>
             </select>
             <button class="btn btn-sm active-view" id="viewGalleryBtn" type="button">Gallery</button>
             <button class="btn btn-sm" id="viewTableBtn" type="button">Table</button>
@@ -451,14 +458,94 @@
                 <th>Product</th>
                 <th>Category &amp; Source</th>
                 <th>Score &amp; Verdict</th>
-                <th>UA COD Profit</th>
-                <th>Cross-Border Profit</th>
-                <th>Wholesale / Retail</th>
+                <th>UA COD Profit (₴ / $)</th>
+                <th>UA Wholesale → Retail</th>
                 <th>Links &amp; Actions</th>
               </tr>
             </thead>
             <tbody id="offersBody"></tbody>
           </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- TAB 2: TYVER AD SPY / IGAMING -->
+    <section class="tab-view" id="tab-tyver">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Tyver.io Live Ad Spy — iGaming &amp; Ukraine E-Com Creatives</div>
+            <div class="prod-sub" id="tyverQuotaDetail">Checking Tyver.io account credits...</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-sm active-view" id="tyverModeIgamingBtn" type="button">🎰 iGaming (AI Gambling)</button>
+            <button class="btn btn-sm" id="tyverModeEcomBtn" type="button">🇺🇦 UA E-Com Ads</button>
+          </div>
+        </div>
+
+        <div class="runner-row" style="grid-template-columns:minmax(200px,1.3fr) 150px 140px auto;">
+          <input class="input" id="tyverQuery" type="text" placeholder="Ad text search (optional for iGaming; e.g. масажер, casino, bonus)..." />
+          <input class="input mono" id="tyverCountries" type="text" value="UA" placeholder="Countries (UA,PL)" />
+          <input class="input mono" id="tyverMinDays" type="number" min="0" value="7" placeholder="Min active days" title="Minimum active days" />
+          <button class="btn btn-emerald" id="tyverSearchBtn" type="button">Search Tyver Live</button>
+        </div>
+
+        <div class="thresholds-grid" id="tyverIgamingFilters" style="grid-template-columns:repeat(3,minmax(0,1fr));">
+          <div class="field">
+            <label for="tyverAiAngle">AI Angle</label>
+            <select class="select" id="tyverAiAngle"><option value="">Any Angle</option></select>
+          </div>
+          <div class="field">
+            <label for="tyverGameType">Gambling Game Type</label>
+            <select class="select" id="tyverGameType">
+              <option value="">All Game Types</option>
+              <option value="Crash">Crash</option>
+              <option value="Slot">Slot</option>
+              <option value="Live">Live</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="tyverSort">Sort By</label>
+            <select class="select" id="tyverSort">
+              <option value="activity_days_amount">Longest Running (Days)</option>
+              <option value="impressions_from">Impressions</option>
+              <option value="creation_time">Newest Created</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="thresholds-grid" id="tyverEcomFilters" style="display:none;grid-template-columns:repeat(2,minmax(0,1fr));">
+          <div class="field">
+            <label for="tyverCta">CTA Button</label>
+            <select class="select" id="tyverCta">
+              <option value="">Any CTA</option>
+              <option value="Order Now">Order Now</option>
+              <option value="Shop Now">Shop Now</option>
+              <option value="Buy Now">Buy Now</option>
+              <option value="Learn More">Learn More</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="tyverCms">Landing CMS</label>
+            <select class="select" id="tyverCms">
+              <option value="">Any CMS</option>
+              <option value="SHOPIFY">Shopify</option>
+              <option value="WOO_COMMERCE">WooCommerce</option>
+              <option value="OPEN_CART">OpenCart</option>
+              <option value="WORD_PRESS">WordPress</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="toolbar">
+          <div class="prod-sub mono" id="tyverResultsMeta">Ready to query Tyver.io Public API</div>
+          <button class="btn btn-sm" id="tyverNextCursorBtn" type="button" style="display:none;">Load Next Cursor Page ▸</button>
+        </div>
+        <div id="tyverGallery" class="gallery-grid">
+          <div class="loading-box" style="grid-column:1/-1;">Click <b>Search Tyver Live</b> to inspect active iGaming or UA e-commerce creatives.</div>
         </div>
       </section>
     </section>
@@ -568,9 +655,9 @@
       </div>
 
       <div>
-        <div class="section-label">Matched Suppliers (AliExpress / 1688 / UA Telegram)</div>
+        <div class="section-label">Matched Local Wholesale &amp; Drop Suppliers</div>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
-          <button class="btn btn-sm active-view" id="srcTabChina" type="button">China Suppliers</button>
+          <button class="btn btn-sm active-view" id="srcTabChina" type="button">UA Local Wholesale</button>
           <button class="btn btn-sm" id="srcTabTg" type="button">UA Telegram Drops</button>
         </div>
         <div class="supplier-list" id="drawerSuppliers"></div>
@@ -593,7 +680,15 @@
       return FALLBACK_SVG;
     }
 
-    const state = { config: null, report: null, selectedCategories: new Set(), viewMode: 'gallery' };
+    const state = {
+      config: null,
+      report: null,
+      selectedCategories: new Set(),
+      viewMode: 'gallery',
+      tyverMode: 'igaming',
+      tyverCursor: null,
+      tyverItems: [],
+    };
     const $ = (id) => document.getElementById(id);
 
     function esc(v) {
@@ -617,6 +712,7 @@
     function switchTab(name) {
       document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
       document.querySelectorAll('.tab-view').forEach((v) => v.classList.toggle('active', v.id === `tab-${name}`));
+      if (name === 'tyver') { loadTyverQuota(); loadTyverFilters(); }
       if (name === 'channels') loadTgChannels();
       if (name === 'watchlist') { loadWatchlist(); loadHistory(); }
     }
@@ -707,7 +803,7 @@
       $('kpiPeakMargin').textContent = `$${Number(s.max_net_margin_usd || 0).toFixed(2)}`;
       $('kpiAvgMargin').textContent = `Avg Net: $${Number(s.avg_net_margin_usd || 0).toFixed(2)}`;
       $('modeDot').className = `status-dot ${m.mock ? 'mock' : ''}`;
-      $('modeText').textContent = m.mock ? 'Offline Demo' : 'Live Super-Parser';
+      $('modeText').textContent = m.mock ? 'Offline Demo' : 'UA Wholesale Live';
       $('updatedAt').textContent = m.updated_at ? `Updated: ${new Date(m.updated_at).toLocaleTimeString()}` : 'Updated: —';
       renderDiagnostics();
       if (rep.trending_keywords && rep.trending_keywords.length) renderTrends(rep.trending_keywords);
@@ -746,21 +842,24 @@
       const tbody = $('offersBody');
 
       if (!rows.length) {
-        gWrap.innerHTML = '<div class="loading-box" style="grid-column:1/-1;">No products match your filters. Click <b>⚡ Super Parse All Categories</b> to fetch live products.</div>';
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px;">No matching offers.</td></tr>';
+        gWrap.innerHTML = '<div class="loading-box" style="grid-column:1/-1;">No products match your filters. Click <b>⚡ Super Parse UA Wholesale</b> to fetch live Ukrainian wholesale &amp; retail offers.</div>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:28px;">No matching offers.</td></tr>';
         return;
       }
 
       gWrap.innerHTML = rows.map((item) => {
         const ad = item.ad, l = item.landing, m = item.margin, e = item.economics || {};
         const score = Number(e.opportunity_score || 0);
-        const model = e.recommended_model || 'CROSS_BORDER';
-        const uaProf = Number(e.ua_cod_net_profit_usd || 0);
-        const cbProf = Number(e.cross_border_net_profit_usd ?? m.net_margin_usd);
+        const model = e.recommended_model || 'UA_COD';
+        const uaProfUsd = Number(e.ua_cod_net_profit_usd || 0);
+        const uaProfUah = Number(item.ua_net_profit_uah ?? e.ua_net_profit_uah ?? (uaProfUsd * 41.67));
+        const wsUah = Number(item.wholesale_uah ?? e.ua_wholesale_price_uah ?? (m.china_wholesale_price_usd * 41.67));
+        const retUah = Number(item.retail_uah ?? e.ua_retail_price_uah ?? (m.retail_price_usd * 41.67));
         const pic = imgSrc(item.image_url || l.image_url || ad.ad_creative_image_url);
         const prodUrl = item.product_url || l.final_url || l.url;
+        const supUrl = item.supplier_url || item.prom_wholesale_url || item.bigl_url;
         const liveTag = (item.is_live ?? ad.is_live)
-          ? '<span class="badge badge-win">LIVE</span>'
+          ? '<span class="badge badge-win">LIVE UA</span>'
           : '<span class="badge badge-warn">DEMO</span>';
         const soldPill = item.sold_text ? `<span class="badge badge-win">${esc(item.sold_text)}</span>` : '';
         const ratePill = item.rating ? `<span class="badge">★ ${Number(item.rating).toFixed(1)}</span>` : '';
@@ -785,22 +884,23 @@
               <div class="card-title" onclick="openDrawer('${esc(ad.ad_id)}')" title="${esc(l.title)}">${esc(l.title || 'Untitled Product')}</div>
               <div class="card-meta">
                 <span>${esc(ad.page_name)}</span>
-                <span class="mono">COGS <b>$${Number(m.china_wholesale_price_usd).toFixed(2)}</b> → Retail <b>$${Number(m.retail_price_usd).toFixed(2)}</b></span>
+                <span class="mono">Опт <b>${wsUah.toFixed(0)}₴</b> → Retail <b>${retUah.toFixed(0)}₴</b></span>
               </div>
               <div class="profit-strip">
                 <div class="profit-box">
-                  <span class="profit-label">UA COD Net</span>
-                  <span class="profit-val ${uaProf >= 0 ? 'text-win' : 'text-loss'}">$${uaProf.toFixed(2)} (${Number(e.ua_cod_roi_pct || 0).toFixed(0)}%)</span>
+                  <span class="profit-label">UA COD Net (${esc(model)})</span>
+                  <span class="profit-val ${uaProfUsd >= 0 ? 'text-win' : 'text-loss'}">${uaProfUah.toFixed(0)}₴ ($${uaProfUsd.toFixed(2)})</span>
                 </div>
                 <div class="profit-box">
-                  <span class="profit-label">Cross-Border · ${esc(model)}</span>
-                  <span class="profit-val ${cbProf >= 0 ? 'text-accent' : 'text-loss'}">$${cbProf.toFixed(2)} (${Number(e.cross_border_roi_pct || 0).toFixed(0)}%)</span>
+                  <span class="profit-label">COD ROI · Spread</span>
+                  <span class="profit-val text-accent">${Number(e.ua_cod_roi_pct || 0).toFixed(0)}% · ${(retUah - wsUah).toFixed(0)}₴</span>
                 </div>
               </div>
               <div class="card-links">
                 <a class="btn btn-sm btn-primary" href="${esc(prodUrl)}" target="_blank" rel="noopener noreferrer">Listing ↗</a>
-                ${item.ali_url && item.ali_url !== prodUrl ? `<a class="btn btn-sm" href="${esc(item.ali_url)}" target="_blank" rel="noopener noreferrer">AliExpress ↗</a>` : ''}
-                ${item.prom_url && item.prom_url !== prodUrl ? `<a class="btn btn-sm" href="${esc(item.prom_url)}" target="_blank" rel="noopener noreferrer">Prom ↗</a>` : ''}
+                ${supUrl && supUrl !== prodUrl ? `<a class="btn btn-sm btn-emerald" href="${esc(supUrl)}" target="_blank" rel="noopener noreferrer">UA Опт ↗</a>` : ''}
+                ${item.prom_wholesale_url && item.prom_wholesale_url !== prodUrl && item.prom_wholesale_url !== supUrl ? `<a class="btn btn-sm" href="${esc(item.prom_wholesale_url)}" target="_blank" rel="noopener noreferrer">Prom Опт ↗</a>` : ''}
+                ${item.bigl_url && item.bigl_url !== prodUrl && item.bigl_url !== supUrl ? `<a class="btn btn-sm" href="${esc(item.bigl_url)}" target="_blank" rel="noopener noreferrer">Bigl ↗</a>` : ''}
                 <button class="btn btn-sm" onclick="openDrawer('${esc(ad.ad_id)}')" type="button">Inspect</button>
                 <button class="btn btn-sm btn-win" onclick="saveWatchlistItem('${esc(ad.ad_id)}')" type="button">★</button>
               </div>
@@ -813,6 +913,11 @@
         const score = Number(e.opportunity_score || 0);
         const pic = imgSrc(item.image_url || l.image_url);
         const prodUrl = item.product_url || l.final_url || l.url;
+        const supUrl = item.supplier_url || item.prom_wholesale_url || item.bigl_url;
+        const uaProfUsd = Number(e.ua_cod_net_profit_usd || 0);
+        const uaProfUah = Number(item.ua_net_profit_uah ?? e.ua_net_profit_uah ?? (uaProfUsd * 41.67));
+        const wsUah = Number(item.wholesale_uah ?? e.ua_wholesale_price_uah ?? (m.china_wholesale_price_usd * 41.67));
+        const retUah = Number(item.retail_uah ?? e.ua_retail_price_uah ?? (m.retail_price_usd * 41.67));
         return `
           <tr onclick="openDrawer('${esc(ad.ad_id)}')">
             <td>
@@ -825,12 +930,12 @@
               </div>
             </td>
             <td><span class="badge badge-src">${esc(item.source || ad.source)}</span> <span class="prod-sub">${esc(item.category || '')}</span></td>
-            <td><span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span> <span class="badge">${esc(e.recommended_model || 'CROSS_BORDER')}</span></td>
-            <td class="mono">$${Number(e.ua_cod_net_profit_usd || 0).toFixed(2)}</td>
-            <td class="mono">$${Number(e.cross_border_net_profit_usd ?? m.net_margin_usd).toFixed(2)}</td>
-            <td class="mono">$${Number(m.china_wholesale_price_usd).toFixed(2)} / $${Number(m.retail_price_usd).toFixed(2)}</td>
+            <td><span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span> <span class="badge">${esc(e.recommended_model || 'UA_COD')}</span></td>
+            <td class="mono">${uaProfUah.toFixed(0)}₴ ($${uaProfUsd.toFixed(2)})</td>
+            <td class="mono">${wsUah.toFixed(0)}₴ → ${retUah.toFixed(0)}₴</td>
             <td onclick="event.stopPropagation()">
               <a class="btn btn-sm" href="${esc(prodUrl)}" target="_blank" rel="noopener noreferrer">Open ↗</a>
+              ${supUrl && supUrl !== prodUrl ? `<a class="btn btn-sm" href="${esc(supUrl)}" target="_blank" rel="noopener noreferrer">Опт ↗</a>` : ''}
               <button class="btn btn-sm btn-win" onclick="saveWatchlistItem('${esc(ad.ad_id)}')" type="button">★</button>
             </td>
           </tr>`;
@@ -873,11 +978,13 @@
       `).join('') : '<div class="prod-sub">No marketplace benchmarks attached.</div>';
 
       const sups = item.suppliers || [];
-      $('drawerSuppliers').innerHTML = sups.length ? sups.map((s, idx) => `
+      $('drawerSuppliers').innerHTML = sups.length ? sups.map((s, idx) => {
+        const uahStr = s.wholesale_price_uah ? `${Number(s.wholesale_price_uah).toFixed(0)}₴ ($${Number(s.wholesale_price_usd).toFixed(2)})` : `$${Number(s.wholesale_price_usd).toFixed(2)}`;
+        return `
         <div class="supplier-card ${idx === 0 ? 'best' : ''}">
           <div class="supplier-top">
             <strong>${esc(s.supplier_name)} <span class="badge badge-src">${esc(s.source)}</span></strong>
-            <span class="mono text-win">$${Number(s.wholesale_price_usd).toFixed(2)}</span>
+            <span class="mono text-win">${uahStr}</span>
           </div>
           <div class="prod-sub">${esc(s.product_title)}</div>
           <div style="display:flex;justify-content:space-between;font-size:12px;">
@@ -885,7 +992,7 @@
             <a href="${esc(s.product_url)}" target="_blank" rel="noopener noreferrer">Open Supplier ↗</a>
           </div>
         </div>
-      `).join('') : '<div class="prod-sub">No China suppliers matched.</div>';
+      `; }).join('') : '<div class="prod-sub">No UA local wholesale suppliers matched yet.</div>';
 
       const tgs = item.tg_offers || [];
       $('drawerTgOffers').innerHTML = tgs.length ? tgs.map((t) => `
@@ -1132,6 +1239,7 @@
       renderSummary();
       renderProducts();
       loadTrendsForGeo();
+      loadTyverQuota();
       runSimulation();
 
       if (!(state.report?.products || []).length) {
@@ -1139,7 +1247,155 @@
       }
     }
 
+    async function loadTyverQuota() {
+      try {
+        const res = await fetch(apiUrl('/api/tyver/quota'));
+        const q = await res.json();
+        if (q.ok) {
+          $('tyverDot').style.background = 'var(--win)';
+          $('tyverDot').style.boxShadow = '0 0 8px var(--win)';
+          $('tyverTopText').textContent = `Tyver ${q.tariff || 'API'}: ${Number(q.remainder_views || 0).toLocaleString()} views`;
+          $('tyverQuotaDetail').textContent = `Active Plan: ${q.tariff || 'PRO'} · Remaining Views: ${Number(q.remainder_views || 0).toLocaleString()}`;
+        } else {
+          $('tyverDot').style.background = 'var(--warn)';
+          $('tyverDot').style.boxShadow = '0 0 8px var(--warn)';
+          $('tyverTopText').textContent = q.configured ? `Tyver: ${q.status}` : 'Tyver: No Key';
+          $('tyverQuotaDetail').textContent = q.error || 'TYVER_API_KEY not configured';
+        }
+      } catch (_) {}
+    }
+
+    async function loadTyverFilters() {
+      if (loadTyverFilters._loaded) return;
+      try {
+        const res = await fetch(apiUrl('/api/tyver/filters'));
+        const d = await res.json();
+        const angles = d.filters?.ai_angle || [];
+        const sel = $('tyverAiAngle');
+        if (angles.length) {
+          sel.innerHTML = '<option value="">Any Angle</option>' + angles.map((a) => `<option value="${esc(a.value)}">${esc(a.name || a.value)}</option>`).join('');
+          loadTyverFilters._loaded = true;
+        }
+      } catch (_) {}
+    }
+
+    function setTyverMode(mode) {
+      state.tyverMode = mode;
+      state.tyverCursor = null;
+      $('tyverModeIgamingBtn').classList.toggle('active-view', mode === 'igaming');
+      $('tyverModeEcomBtn').classList.toggle('active-view', mode === 'ecom_ua');
+      $('tyverIgamingFilters').style.display = mode === 'igaming' ? 'grid' : 'none';
+      $('tyverEcomFilters').style.display = mode === 'ecom_ua' ? 'grid' : 'none';
+    }
+
+    async function searchTyver(append = false) {
+      const btn = $('tyverSearchBtn');
+      const prev = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Querying Tyver...';
+      if (!append) {
+        state.tyverCursor = null;
+        $('tyverGallery').innerHTML = '<div class="loading-box" style="grid-column:1/-1;">Fetching live creatives from Tyver.io...</div>';
+      }
+      try {
+        const countriesRaw = $('tyverCountries').value.trim();
+        const countries = countriesRaw ? countriesRaw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) : ['UA'];
+        const payload = {
+          mode: state.tyverMode,
+          query: $('tyverQuery').value.trim(),
+          countries,
+          activity_days_amount_gte: $('tyverMinDays').value ? Number($('tyverMinDays').value) : null,
+          sort: $('tyverSort').value || 'activity_days_amount',
+          cursor: append ? state.tyverCursor : null,
+          page_size: 24,
+        };
+        if (state.tyverMode === 'igaming') {
+          payload.ai_category = 'GAMBLING';
+          payload.ai_angle = $('tyverAiAngle').value || null;
+          payload.ai_gambling_game_type = $('tyverGameType').value || null;
+        } else {
+          payload.cta = $('tyverCta').value || null;
+          payload.cms = $('tyverCms').value || null;
+        }
+        const res = await fetch(apiUrl('/api/tyver/search'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.quota && data.quota.ok) {
+          $('tyverTopText').textContent = `Tyver ${data.quota.tariff || 'API'}: ${Number(data.quota.remainder_views || 0).toLocaleString()} views`;
+          $('tyverQuotaDetail').textContent = `Active Plan: ${data.quota.tariff || 'PRO'} · Remaining Views: ${Number(data.quota.remainder_views || 0).toLocaleString()}`;
+        }
+        if (!data.ok) {
+          $('tyverResultsMeta').textContent = `Error: ${data.error || 'Request failed'}`;
+          $('tyverGallery').innerHTML = `<div class="loading-box" style="grid-column:1/-1;">${esc(data.error || 'Unable to fetch Tyver creatives.')}</div>`;
+          $('tyverNextCursorBtn').style.display = 'none';
+          return;
+        }
+        state.tyverCursor = data.cursor || null;
+        const incoming = data.items || [];
+        state.tyverItems = append ? [...state.tyverItems, ...incoming] : incoming;
+        $('tyverResultsMeta').textContent = `Showing ${state.tyverItems.length} of ${Number(data.total || state.tyverItems.length).toLocaleString()} creatives (${state.tyverMode})`;
+        $('tyverNextCursorBtn').style.display = state.tyverCursor ? 'inline-flex' : 'none';
+        renderTyverCards();
+      } catch (err) {
+        showToast(`Tyver error: ${err.message}`, false);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    }
+
+    function renderTyverCards() {
+      const wrap = $('tyverGallery');
+      const items = state.tyverItems || [];
+      if (!items.length) {
+        wrap.innerHTML = '<div class="loading-box" style="grid-column:1/-1;">No creatives matched these Tyver filters.</div>';
+        return;
+      }
+      wrap.innerHTML = items.map((c) => {
+        const pic = imgSrc(c.thumbnail_url || c.image_url);
+        const days = Number(c.activity_days || 0);
+        const cntries = (c.countries || []).slice(0, 4).join(', ');
+        return `
+          <article class="product-card">
+            <div class="card-media">
+              <img src="${esc(pic)}" alt="${esc(c.title)}" loading="lazy" onerror="this.onerror=null;this.src='${FALLBACK_SVG}'" />
+              <div class="media-top-left">
+                <span class="badge badge-win">${days}d active</span>
+                <span class="badge badge-src">${esc(c.media_type || 'AD')}</span>
+              </div>
+              <div class="media-top-right">
+                ${c.cta ? `<span class="badge">${esc(c.cta)}</span>` : ''}
+              </div>
+              <div class="media-bottom-left">
+                ${cntries ? `<span class="badge">${esc(cntries)}</span>` : ''}
+                ${c.cms ? `<span class="badge">${esc(c.cms)}</span>` : ''}
+                ${c.ai_gambling_game_type ? `<span class="badge badge-warn">${esc(c.ai_gambling_game_type)}</span>` : ''}
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="card-title" title="${esc(c.title)}">${esc(c.title || c.page_name)}</div>
+              <div class="card-meta">
+                <span>${esc(c.page_name)}</span>
+                <span class="mono">${esc(c.target_domain || '')}</span>
+              </div>
+              <div class="prod-sub" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${esc(c.text || '')}</div>
+              <div class="card-links">
+                ${c.landing_url ? `<a class="btn btn-sm btn-primary" href="${esc(c.landing_url)}" target="_blank" rel="noopener noreferrer">Landing ↗</a>` : ''}
+                ${c.video_url ? `<a class="btn btn-sm btn-emerald" href="${esc(c.video_url)}" target="_blank" rel="noopener noreferrer">Video ↗</a>` : ''}
+              </div>
+            </div>
+          </article>`;
+      }).join('');
+    }
+
     document.querySelectorAll('.tab-btn').forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
+    $('tyverModeIgamingBtn').onclick = () => setTyverMode('igaming');
+    $('tyverModeEcomBtn').onclick = () => setTyverMode('ecom_ua');
+    $('tyverSearchBtn').onclick = () => searchTyver(false);
+    $('tyverNextCursorBtn').onclick = () => searchTyver(true);
     $('runScanBtn').onclick = () => runScan(false);
     $('superParseBtn').onclick = () => runScan(true);
     $('trendsGeo').onchange = loadTrendsForGeo;

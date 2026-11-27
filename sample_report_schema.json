@@ -115,9 +115,45 @@
           "type": "number"
         },
         "recommended_model": {
-          "default": "cross_border",
+          "default": "UA_COD",
           "title": "Recommended Model",
           "type": "string"
+        },
+        "ua_wholesale_price_uah": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ua Wholesale Price Uah"
+        },
+        "ua_retail_price_uah": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ua Retail Price Uah"
+        },
+        "ua_net_profit_uah": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ua Net Profit Uah"
         }
       },
       "title": "CoFounderEconomics",
@@ -372,7 +408,7 @@
       "type": "object"
     },
     "SupplierOffer": {
-      "description": "Matched 1688.com / Alibaba / AliExpress wholesale supplier offer.",
+      "description": "Matched wholesale supplier offer (UA local wholesale or legacy 1688/Alibaba).",
       "properties": {
         "supplier_name": {
           "title": "Supplier Name",
@@ -387,6 +423,7 @@
           "type": "string"
         },
         "wholesale_price_rmb": {
+          "default": 0.0,
           "minimum": 0,
           "title": "Wholesale Price Rmb",
           "type": "number"
@@ -395,6 +432,19 @@
           "minimum": 0,
           "title": "Wholesale Price Usd",
           "type": "number"
+        },
+        "wholesale_price_uah": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wholesale Price Uah"
         },
         "rating": {
           "anyOf": [
@@ -442,8 +492,13 @@
           "title": "Image Url"
         },
         "source": {
-          "default": "1688",
+          "default": "ua_wholesale",
           "title": "Source",
+          "type": "string"
+        },
+        "supplier_type": {
+          "default": "",
+          "title": "Supplier Type",
           "type": "string"
         },
         "sales_count_text": {
@@ -461,7 +516,6 @@
         "supplier_name",
         "product_title",
         "product_url",
-        "wholesale_price_rmb",
         "wholesale_price_usd"
       ],
       "title": "SupplierOffer",

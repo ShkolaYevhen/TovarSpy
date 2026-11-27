@@ -38,7 +38,20 @@ class TestWebApp(unittest.TestCase):
         resp_page = self.client.get("/spy/")
         self.assertEqual(resp_page.status_code, 200)
         self.assertIn("TovarSpy", resp_page.text)
-        for marker in ("/api/scan", "/api/super-parse", "/api/img", "/api/trends", "/api/export/csv", "/api/alert", "/api/simulate", "/api/tg-channels"):
+        for marker in (
+            "/api/scan",
+            "/api/super-parse",
+            "/api/img",
+            "/api/trends",
+            "/api/tyver/quota",
+            "/api/tyver/search",
+            "/api/export/csv",
+            "/api/alert",
+            "/api/simulate",
+            "/api/tg-channels",
+            "UA Wholesale",
+            "Tyver Ad Spy",
+        ):
             self.assertIn(marker, resp_page.text)
 
         resp_root_page = self.client.get("/")
@@ -51,7 +64,9 @@ class TestWebApp(unittest.TestCase):
         cfg = cfg_resp.json()
         self.assertEqual(cfg["target_countries"], ["UA", "PL", "RO", "CZ", "DE", "US"])
         self.assertEqual(cfg["min_duration_days"], 7)
-        self.assertIn("aliexpress", cfg["available_sources"])
+        self.assertIn("prom_wholesale", cfg["available_sources"])
+        self.assertIn("tyver", cfg["available_sources"])
+        self.assertTrue(cfg["skip_china_sourcing"])
         self.assertIn("curated_categories", cfg)
         self.assertIn("ua_cod_return_rate", cfg)
 

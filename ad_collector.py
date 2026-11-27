@@ -12,6 +12,7 @@ from playwright.async_api import async_playwright
 
 from config import AdRecord, Settings, get_httpx_proxy, make_product_placeholder_svg
 from storage import get_cache, set_cache
+from tyver_client import fetch_tyver_creatives
 
 logger = logging.getLogger(__name__)
 
@@ -492,6 +493,53 @@ async def fetch_tiktok_ads(
     return records
 
 
+async def fetch_tyver_ads(
+    client: httpx.AsyncClient,
+    settings: Settings,
+    query: str,
+    countries: list[str],
+    mode: str = "ecom_ua",
+    limit: int = 12,
+) -> list[AdRecord]:
+    """Fetch active ads from Tyver.io API and normalize into AdRecord items."""
+    if not settings.TYVER_API_KEY:
+        return []
+
+    res = await fetch_tyver_creatives(
+        api_key=settings.TYVER_API_KEY,
+        mode=mode,
+        query=query,
+        countries=countries,
+        activity_days_amount_gte=settings.MIN_DURATION_DAYS,
+        page_size=limit,
+        client=client,
+    )
+    if not res.get("ok"):
+        return []
+
+    records: list[AdRecord] = []
+    for item in res.get("items", []):
+        landing = str(item.get("landing_url") or "").strip()
+        if not landing:
+            continue
+        days = max(0, int(item.get("activity_days") or 0))
+        min_sets = settings.MIN_ACTIVE_AD_SETS if days >= settings.MIN_DURATION_DAYS else 1
+        records.append(
+            AdRecord(
+                ad_id=f"tyver-{item.get('id')}",
+                page_name=str(item.get("page_name") or item.get("title") or "Tyver Advertiser"),
+                landing_url=landing,
+                days_running=days,
+                ad_creative_image_url=item.get("image_url") or item.get("thumbnail_url"),
+                active_ad_sets=max(1, min_sets),
+                countries=item.get("countries") or [c.upper() for c in countries],
+                source="tyver",
+                is_live=True,
+            )
+        )
+    return records
+
+
 def generate_mock_ads(
     query: str = "",
     countries: Optional[list[str]] = None,
@@ -663,6 +711,9 @@ async def collect_winning_ads(
 
         async def _run_with_client(http_client: httpx.AsyncClient) -> list[AdRecord]:
             combined: list[AdRecord] = []
+            if "tyver" in selected or (sources is None and settings.TYVER_API_KEY):
+                combined.extend(await fetch_tyver_ads(http_client, settings, query, target_countries))
+
             if "meta" in selected or "meta_web" in selected:
                 meta_res = await fetch_meta_ads(http_client, settings, query, target_countries)
                 if not meta_res and use_public_fallback:

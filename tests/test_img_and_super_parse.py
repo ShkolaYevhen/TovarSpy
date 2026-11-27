@@ -101,7 +101,7 @@ class TestImgProxyAndSuperParse(unittest.IsolatedAsyncioTestCase):
 
         self.assertGreaterEqual(len(res["reports"]), 2)
         self.assertTrue(all(r.ad.is_live for r in res["reports"]))
-        self.assertTrue(res["source_diagnostics"]["aliexpress"].startswith("live:"))
+        self.assertIn("skipped", res["source_diagnostics"]["china_1688"])
         self.assertTrue(res["source_diagnostics"]["prom_ua"].startswith("live:"))
         self.assertEqual(res["trending_keywords"][0]["title"], "Massager Pro")
         self.assertGreaterEqual(len(res["external_blocks"]), 1)

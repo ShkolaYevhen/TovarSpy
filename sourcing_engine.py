@@ -18,6 +18,7 @@ from config import (
     get_httpx_proxy,
     make_product_placeholder_svg,
 )
+from marketplace_intel import fetch_ua_wholesale_offers
 from storage import get_cache, list_tg_channels, seed_default_channels, set_cache
 
 logger = logging.getLogger(__name__)
@@ -574,41 +575,54 @@ async def find_zero_cost_suppliers(
     client: Optional[httpx.AsyncClient] = None,
     mock: bool = False,
 ) -> dict[str, Any]:
-    """Combine zero-API China sourcing, cached 1688 RapidAPI, and UA Telegram drop channels."""
+    """Route supplier discovery to Ukraine local wholesale + TG drops when SKIP_CHINA_SOURCING=True."""
     clean_title = (product_title or "trending gadget").strip()
-    cache_key = f"sourcing:{clean_title.lower()}:{(image_url or '').strip()}"
+    skip_china = bool(settings.SKIP_CHINA_SOURCING)
+    cache_key = f"sourcing:{'ua' if skip_china else 'cn'}:{clean_title.lower()}:{(image_url or '').strip()}"
     if not mock:
         cached = get_cache(settings.DB_PATH, cache_key, settings.CACHE_TTL_SECONDS)
         if isinstance(cached, dict):
             china_offers = [SupplierOffer.model_validate(c) for c in cached.get("china_offers", [])]
+            ua_wholesale = [SupplierOffer.model_validate(u) for u in cached.get("ua_wholesale_offers", [])]
             ua_offers = [TelegramDropOffer.model_validate(u) for u in cached.get("ua_drop_offers", [])]
             return {
+                "ua_wholesale_offers": ua_wholesale,
+                "best_ua_wholesale_offer": ua_wholesale[0] if ua_wholesale else None,
                 "china_offers": china_offers,
                 "ua_drop_offers": ua_offers,
                 "best_china_offer": china_offers[0] if china_offers else None,
                 "best_ua_drop_offer": ua_offers[0] if ua_offers else None,
             }
 
-    async def _gather_all(http_client: httpx.AsyncClient) -> tuple[list[SupplierOffer], list[TelegramDropOffer]]:
-        china_task = match_1688_suppliers(image_url or "", settings, client=http_client, mock=mock)
+    async def _gather_all(
+        http_client: httpx.AsyncClient,
+    ) -> tuple[list[SupplierOffer], list[SupplierOffer], list[TelegramDropOffer]]:
         tg_task = search_telegram_dropshipping(clean_title, settings, client=http_client, mock=mock)
         if mock:
+            china_task = match_1688_suppliers(image_url or "", settings, client=http_client, mock=True)
             china_1688, ua_offers = await asyncio.gather(china_task, tg_task)
-            return china_1688, ua_offers
+            return [], china_1688, ua_offers
+
+        if skip_china:
+            ua_ws_task = fetch_ua_wholesale_offers(clean_title, settings, client=http_client)
+            (ua_wholesale, _diag), ua_offers = await asyncio.gather(ua_ws_task, tg_task)
+            return ua_wholesale[:6], [], ua_offers
+
+        china_task = match_1688_suppliers(image_url or "", settings, client=http_client, mock=False)
         public_task = _fetch_public_china_offers(clean_title, settings, http_client)
         china_1688, public_china, ua_offers = await asyncio.gather(china_task, public_task, tg_task)
         combined_china = china_1688 + public_china
         combined_china.sort(key=lambda o: o.wholesale_price_usd)
-        return combined_china[:5], ua_offers
+        return [], combined_china[:5], ua_offers
 
     if client is not None:
-        china_offers, ua_offers = await _gather_all(client)
+        ua_wholesale, china_offers, ua_offers = await _gather_all(client)
     else:
         proxy = get_httpx_proxy(settings)
         async with httpx.AsyncClient(timeout=15.0, proxy=proxy, follow_redirects=True) as owned:
-            china_offers, ua_offers = await _gather_all(owned)
+            ua_wholesale, china_offers, ua_offers = await _gather_all(owned)
 
-    if not china_offers and not mock:
+    if not china_offers and not mock and not skip_china:
         rmb_rate = settings.FX_RATES_TO_USD.get("RMB", 0.14)
         est_usd = 4.20
         china_offers = [
@@ -629,12 +643,15 @@ async def find_zero_cost_suppliers(
             settings.DB_PATH,
             cache_key,
             {
+                "ua_wholesale_offers": [u.model_dump(mode="json") for u in ua_wholesale],
                 "china_offers": [c.model_dump(mode="json") for c in china_offers],
                 "ua_drop_offers": [u.model_dump(mode="json") for u in ua_offers],
             },
         )
 
     return {
+        "ua_wholesale_offers": ua_wholesale,
+        "best_ua_wholesale_offer": ua_wholesale[0] if ua_wholesale else None,
         "china_offers": china_offers,
         "ua_drop_offers": ua_offers,
         "best_china_offer": china_offers[0] if china_offers else None,

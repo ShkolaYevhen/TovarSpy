@@ -13,11 +13,23 @@ from config import (
     MarketplaceIntelReport,
     MarketplaceSignal,
     Settings,
+    SupplierOffer,
     get_httpx_proxy,
 )
 from storage import get_cache, set_cache
 
 logger = logging.getLogger(__name__)
+
+_INSTALLMENT_RE = re.compile(
+    r"(?:від|от)?\s*\d[\d\s\u00a0]*(?:[.,]\d{1,2})?\s*(?:₴|грн|UAH)?\s*/\s*міс(?:\.|яц[ьі]?)?"
+    r"|оплата\s+частинами[^₴\d]*\d[\d\s\u00a0]*(?:[.,]\d{1,2})?\s*(?:₴|грн|UAH)?",
+    re.I,
+)
+
+
+def _strip_installment_text(text: str) -> str:
+    """Remove Prom/Bigl monthly installment snippets like 'від 250 ₴ /міс' before price extraction."""
+    return _INSTALLMENT_RE.sub(" ", text or "")
 
 _CAPTCHA_MARKERS = (
     "validatecaptcha",
@@ -228,7 +240,7 @@ def parse_prom_or_rozetka_html(
         )
 
     soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(" ", strip=True)
+    text = _strip_installment_text(soup.get_text(" ", strip=True))
     prices = [
         val
         for raw in re.findall(r"(\d[\d\s\u00a0]*(?:[.,]\d{1,2})?)\s*(?:₴|грн|UAH)", text, re.I)
@@ -519,8 +531,14 @@ async def analyze_marketplace_intel(
     return _aggregate_intel_report(query, signals)
 
 
-def parse_prom_items(html: str, query: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Extract individual Prom.ua product cards with real images, UAH prices, and product links."""
+def parse_prom_items(
+    html: str,
+    query: str,
+    limit: int = 10,
+    source: str = "prom_ua",
+    supplier_type: str = "ua_retail",
+) -> list[dict[str, Any]]:
+    """Extract individual Prom.ua product cards (retail or wholesale) ignoring '/міс' installments."""
     if not html or _is_blocked_html(html):
         return []
     soup = BeautifulSoup(html, "html.parser")
@@ -537,11 +555,18 @@ def parse_prom_items(html: str, query: str, limit: int = 10) -> list[dict[str, A
         href = urljoin("https://prom.ua", str(link_el["href"]))
         if not title or href in seen:
             continue
-        price_text = price_el.get_text(" ", strip=True) if price_el else card.get_text(" ", strip=True)
-        m_price = re.search(r"(\d[\d\s\u00a0]*(?:[.,]\d{1,2})?)", price_text)
-        price_uah = _parse_float(m_price.group(1)) if m_price else None
+
+        price_uah: Optional[float] = None
+        if price_el and price_el.get("data-qaprice"):
+            price_uah = _parse_float(str(price_el["data-qaprice"]))
         if price_uah is None:
+            raw_price_text = price_el.get_text(" ", strip=True) if price_el else card.get_text(" ", strip=True)
+            cleaned_price_text = _strip_installment_text(raw_price_text)
+            m_price = re.search(r"(\d[\d\s\u00a0]*(?:[.,]\d{1,2})?)\s*(?:₴|грн|UAH)?", cleaned_price_text, re.I)
+            price_uah = _parse_float(m_price.group(1)) if m_price else None
+        if price_uah is None or price_uah <= 0:
             continue
+
         img_el = card.find("img")
         img_url = ""
         if img_el:
@@ -552,7 +577,8 @@ def parse_prom_items(html: str, query: str, limit: int = 10) -> list[dict[str, A
         seller = seller_el.get_text(" ", strip=True) if seller_el else "Prom.ua Seller"
         seen.add(href)
         items.append({
-            "source": "prom_ua",
+            "source": source,
+            "supplier_type": supplier_type,
             "country": "UA",
             "query": query,
             "title": title[:160],
@@ -567,6 +593,181 @@ def parse_prom_items(html: str, query: str, limit: int = 10) -> list[dict[str, A
         if len(items) >= limit:
             break
     return items
+
+
+def parse_bigl_items(
+    html: str,
+    query: str,
+    limit: int = 10,
+    supplier_type: str = "ua_wholesale",
+) -> list[dict[str, Any]]:
+    """Extract Bigl.ua product cards with UAH prices, photos, and product links."""
+    if not html or _is_blocked_html(html):
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    uah_rate = DEFAULT_FX_RATES_TO_USD.get("UAH", 0.024)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for link in soup.select('a[href*="/p"]'):
+        raw_href = str(link.get("href") or "").strip()
+        if not raw_href:
+            continue
+        href = urljoin("https://bigl.ua", raw_href).split("?")[0]
+        if href in seen:
+            continue
+
+        card = link
+        for _ in range(4):
+            if card.parent is not None and len(card.parent.get_text(" ", strip=True)) < 550:
+                card = card.parent
+            else:
+                break
+
+        raw_text = card.get_text(" ", strip=True)
+        clean_text = _strip_installment_text(raw_text)
+        prices = [
+            val
+            for m in re.findall(r"(\d[\d\s\u00a0]*(?:[.,]\d{1,2})?)\s*(?:₴|грн)", clean_text, re.I)
+            if (val := _parse_float(m)) is not None and 20.0 <= val <= 100000.0
+        ]
+        if not prices:
+            continue
+        price_uah = prices[0]
+
+        title = link.get_text(" ", strip=True)
+        if not title or len(title) < 6:
+            title_node = card.select_one('[data-qaid="product_name"], h2, h3, .bgl-product__title')
+            title = title_node.get_text(" ", strip=True) if title_node else clean_text[:120]
+        if not title:
+            continue
+
+        img_el = card.find("img")
+        img_url = ""
+        if img_el:
+            img_url = str(img_el.get("src") or img_el.get("data-src") or "").strip()
+            if img_url.startswith("//"):
+                img_url = "https:" + img_url
+
+        seen.add(href)
+        items.append({
+            "source": "bigl_ua",
+            "supplier_type": supplier_type,
+            "country": "UA",
+            "query": query,
+            "title": title[:160],
+            "price": price_uah,
+            "currency": "UAH",
+            "price_usd": round(price_uah * uah_rate, 2),
+            "image_url": img_url,
+            "product_url": href,
+            "seller_name": "Bigl.ua Supplier",
+            "is_live": True,
+        })
+        if len(items) >= limit:
+            break
+    return items
+
+
+async def fetch_ua_wholesale_offers(
+    query: str,
+    settings: Settings,
+    limit_per_source: int = 8,
+    client: Optional[httpx.AsyncClient] = None,
+) -> tuple[list[SupplierOffer], dict[str, str]]:
+    """Fetch live Ukrainian local wholesale offers from Prom.ua wholesale, OLX.ua opt, and Bigl.ua."""
+    clean_q = (query or "органайзер").strip()
+    cache_key = f"ua_wholesale:{clean_q.lower()}:{limit_per_source}"
+    cached = get_cache(settings.DB_PATH, cache_key, settings.CACHE_TTL_SECONDS)
+    if isinstance(cached, dict) and isinstance(cached.get("offers"), list):
+        offers = [SupplierOffer.model_validate(o) for o in cached["offers"]]
+        diag = dict(cached.get("diagnostics") or {})
+        return offers, {k: v.replace("live:", "cached:") for k, v in diag.items()}
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.7",
+    }
+    q_enc = quote_plus(clean_q)
+    q_slug = quote_plus(f"{clean_q} опт").replace("+", "-")
+
+    sources_cfg = [
+        (
+            "prom_wholesale",
+            f"https://prom.ua/ua/search?search_term={q_enc}&sale_type=wholesale",
+            lambda h: parse_prom_items(h, clean_q, limit=limit_per_source, source="prom_wholesale", supplier_type="ua_wholesale"),
+        ),
+        (
+            "olx_opt",
+            f"https://www.olx.ua/uk/list/q-{q_slug}/",
+            lambda h: parse_olx_items(h, clean_q, domain="ua", limit=limit_per_source),
+        ),
+        (
+            "bigl_ua",
+            f"https://bigl.ua/ua/search?search_term={q_enc}",
+            lambda h: parse_bigl_items(h, clean_q, limit=limit_per_source, supplier_type="ua_wholesale"),
+        ),
+    ]
+
+    async def _fetch_src(http_client: httpx.AsyncClient, name: str, url: str, parser: Any) -> tuple[str, list[SupplierOffer], str]:
+        try:
+            resp = await http_client.get(url, headers=headers)
+            if resp.status_code in (403, 429, 503):
+                return name, [], f"blocked: HTTP {resp.status_code}"
+            if resp.status_code != 200:
+                return name, [], f"empty: HTTP {resp.status_code}"
+            if _is_blocked_html(resp.text):
+                return name, [], "blocked: CAPTCHA/anti-bot"
+            raw_items = parser(resp.text)
+            converted: list[SupplierOffer] = []
+            for it in raw_items:
+                p_uah = float(it.get("price") or 0.0)
+                if p_uah <= 0:
+                    continue
+                src_tag = "olx_opt" if name == "olx_opt" else it.get("source", name)
+                converted.append(
+                    SupplierOffer(
+                        supplier_name=str(it.get("seller_name") or name),
+                        product_title=str(it.get("title") or clean_q),
+                        product_url=str(it.get("product_url") or ""),
+                        wholesale_price_rmb=0.0,
+                        wholesale_price_usd=float(it.get("price_usd") or round(p_uah * DEFAULT_FX_RATES_TO_USD["UAH"], 2)),
+                        wholesale_price_uah=round(p_uah, 2),
+                        moq=1,
+                        image_url=it.get("image_url") or None,
+                        source=src_tag,
+                        supplier_type="ua_wholesale",
+                        sales_count_text="UA Wholesale",
+                        is_live=True,
+                    )
+                )
+            if converted:
+                return name, converted, f"live: {len(converted)} items"
+            return name, [], "empty: 0 items"
+        except httpx.HTTPError as exc:
+            return name, [], f"error: {exc}"
+
+    if client is not None:
+        batches = await asyncio.gather(*(_fetch_src(client, n, u, p) for n, u, p in sources_cfg))
+    else:
+        proxy = get_httpx_proxy(settings)
+        async with httpx.AsyncClient(timeout=15.0, proxy=proxy, follow_redirects=True) as owned:
+            batches = await asyncio.gather(*(_fetch_src(owned, n, u, p) for n, u, p in sources_cfg))
+
+    all_offers: list[SupplierOffer] = []
+    diagnostics: dict[str, str] = {}
+    for name, items, status_msg in batches:
+        all_offers.extend(items)
+        diagnostics[name] = status_msg
+
+    all_offers.sort(key=lambda o: (o.wholesale_price_uah or 999999.0, o.wholesale_price_usd))
+    if all_offers:
+        set_cache(
+            settings.DB_PATH,
+            cache_key,
+            {"offers": [o.model_dump(mode="json") for o in all_offers], "diagnostics": diagnostics},
+        )
+    return all_offers, diagnostics
 
 
 def parse_olx_items(html: str, query: str, domain: str = "ua", limit: int = 10) -> list[dict[str, Any]]:
@@ -654,6 +855,9 @@ async def fetch_live_marketplace_products(
         elif plat == "olx_pl":
             url = f"https://www.olx.pl/oferty/q-{q_slug}/"
             parser = lambda h: parse_olx_items(h, query, domain="pl", limit=limit_per_platform)
+        elif plat == "bigl_ua":
+            url = f"https://bigl.ua/ua/search?search_term={q_enc}"
+            parser = lambda h: parse_bigl_items(h, query, limit=limit_per_platform, supplier_type="ua_retail")
         else:
             return plat, [], "unsupported"
 

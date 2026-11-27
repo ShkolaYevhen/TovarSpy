@@ -27,10 +27,12 @@ class Settings(BaseSettings):
     META_ACCESS_TOKEN: Optional[str] = None
     ADHEART_API_KEY: Optional[str] = None
     TIKTOK_ACCESS_TOKEN: Optional[str] = None
+    TYVER_API_KEY: Optional[str] = None
     RAPIDAPI_1688_KEY: Optional[str] = None
     RAPIDAPI_1688_HOST: str = "1688-datahub.p.rapidapi.com"
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_CHAT_ID: Optional[str] = None
+    SKIP_CHINA_SOURCING: bool = True
 
     # Ad filtering thresholds
     TARGET_COUNTRIES: list[str] = Field(
@@ -43,6 +45,7 @@ class Settings(BaseSettings):
     SHIPPING_COST_EST_USD: float = 2.50
     EST_CPA_USD: float = 6.00
     WINNER_NET_MARGIN_USD: float = 10.00
+    USD_TO_UAH: float = 41.67
     FX_RATES_TO_USD: dict[str, float] = Field(
         default_factory=lambda: dict(DEFAULT_FX_RATES_TO_USD)
     )
@@ -129,18 +132,20 @@ class LandingPageData(BaseModel):
 
 
 class SupplierOffer(BaseModel):
-    """Matched 1688.com / Alibaba / AliExpress wholesale supplier offer."""
+    """Matched wholesale supplier offer (UA local wholesale or legacy 1688/Alibaba)."""
 
     supplier_name: str
     product_title: str
     product_url: str
-    wholesale_price_rmb: float = Field(ge=0)
+    wholesale_price_rmb: float = Field(default=0.0, ge=0)
     wholesale_price_usd: float = Field(ge=0)
+    wholesale_price_uah: Optional[float] = Field(default=None, ge=0)
     rating: Optional[float] = Field(default=None, ge=0, le=5.0)
     years_on_1688: Optional[int] = Field(default=None, ge=0)
     moq: int = Field(default=1, ge=1)
     image_url: Optional[str] = None
-    source: str = "1688"
+    source: str = "ua_wholesale"
+    supplier_type: str = ""
     sales_count_text: str = ""
     is_live: bool = True
 
@@ -219,7 +224,10 @@ class CoFounderEconomics(BaseModel):
     demand_velocity_score: float = Field(default=0.0, ge=0, le=100)
     competition_score: float = Field(default=0.0, ge=0, le=100)
     opportunity_score: float = Field(default=0.0, ge=0, le=100)
-    recommended_model: str = "cross_border"
+    recommended_model: str = "UA_COD"
+    ua_wholesale_price_uah: Optional[float] = None
+    ua_retail_price_uah: Optional[float] = None
+    ua_net_profit_uah: Optional[float] = None
 
 
 class AnalyzedProductReport(BaseModel):

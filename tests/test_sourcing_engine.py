@@ -21,6 +21,7 @@ class TestSourcingEngine(unittest.IsolatedAsyncioTestCase):
             _env_file=None,
             DB_PATH=str(Path(self.tmp_dir.name) / "sourcing.db"),
             DEFAULT_TG_CHANNELS=["drop_ua"],
+            SKIP_CHINA_SOURCING=False,
         )
 
     def tearDown(self) -> None:
