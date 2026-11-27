@@ -248,9 +248,9 @@ class TestAdCollector(unittest.IsolatedAsyncioTestCase):
 
     async def test_collect_winning_ads_mock_mode(self) -> None:
         winners = await collect_winning_ads(self.settings, mock=True)
-        self.assertEqual(len(winners), 4)
+        self.assertEqual(len(winners), 5)
         for ad in winners:
-            self.assertGreaterEqual(ad.days_running, 7)
+            self.assertGreaterEqual(ad.days_running, 3)
             self.assertGreaterEqual(ad.active_ad_sets, 5)
 
 

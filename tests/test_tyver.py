@@ -10,7 +10,12 @@ from fastapi.testclient import TestClient
 
 from ad_collector import collect_winning_ads
 from config import Settings
-from tyver_client import fetch_tyver_creatives, fetch_tyver_quota
+from tyver_client import (
+    discover_winning_ads,
+    fetch_tyver_creatives,
+    fetch_tyver_quota,
+    validate_cross_advertiser_demand,
+)
 from web_app import create_app
 
 
@@ -190,6 +195,107 @@ class TestTyverClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ads[0].days_running, 15)
         self.assertEqual(ads[0].landing_url, "https://relaxua.prom.ua/p123-massager")
         self.assertTrue(ads[0].is_live)
+
+    async def test_stage1_discover_winning_ads_filters_junk_and_dedups(self) -> None:
+        raw_items = [
+            {
+                "provider_id": "1",
+                "activity_days_amount": 8,
+                "bodies": ["Бездротовий блендер"],
+                "link_titles": ["Портативний блендер"],
+                "countries": ["UA"],
+                "provider_page_name": "ShopA",
+                "target_url": "https://shop-a.com.ua/blender?fbclid=111",
+                "domain": "shop-a.com.ua",
+                "cta": "Shop now",
+                "media": [{"content_type": "image/jpeg", "compressed_image_url": "https://img/b.jpg"}],
+            },
+            {
+                "provider_id": "2",
+                "activity_days_amount": 5,
+                "bodies": ["Бездротовий блендер"],
+                "link_titles": ["Портативний блендер"],
+                "countries": ["UA"],
+                "provider_page_name": "ShopA",
+                "target_url": "https://shop-a.com.ua/blender?utm_source=fb",
+                "domain": "shop-a.com.ua",
+                "cta": "Order now",
+            },
+            {
+                "provider_id": "3",
+                "activity_days_amount": 90,
+                "bodies": ["Amazon product"],
+                "countries": ["UA"],
+                "provider_page_name": "Amz",
+                "target_url": "https://www.amazon.com/dp/B001",
+                "domain": "amazon.com",
+            },
+            {
+                "provider_id": "4",
+                "activity_days_amount": 20,
+                "bodies": ["PinUp Casino"],
+                "countries": ["UA"],
+                "provider_page_name": "Slots",
+                "target_url": "https://spin-club.site/",
+                "verticals": ["GAMBLING"],
+            },
+        ]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            qs = parse_qs(urlparse(str(request.url)).query)
+            self.assertIn("creation_date_gte", qs)
+            self.assertEqual(qs["activity_days_amount_gte"], ["3"])
+            self.assertEqual(qs["countries"], ["UA"])
+            return httpx.Response(200, json={"detail": "Success", "data": {"items": raw_items, "total": 4}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            res = await discover_winning_ads("tyv_abc", country="UA", min_days=3, client=client)
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(len(res["items"]), 1)
+        self.assertEqual(res["items"][0]["duplicate_count"], 2)
+        self.assertEqual(res["items"][0]["activity_days"], 8)
+
+    async def test_stage3_validate_cross_advertiser_demand(self) -> None:
+        ads = [
+            {
+                "provider_id": f"ad-{i}",
+                "activity_days_amount": 5 + i,
+                "bodies": ["Портативний блендер USB 450мл"],
+                "link_titles": ["Портативний блендер USB"],
+                "countries": ["UA"],
+                "provider_page_name": f"Store {i % 3}",
+                "target_url": f"https://store{i}.com.ua/blender",
+                "domain": f"store{i}.com.ua",
+                "impressions": 1000,
+            }
+            for i in range(6)
+        ] + [
+            {
+                "provider_id": "unrelated-1",
+                "activity_days_amount": 10,
+                "bodies": ["Зимова куртка пуховик"],
+                "link_titles": ["Куртка"],
+                "countries": ["UA"],
+                "provider_page_name": "Jacket",
+                "target_url": "https://jacket.com.ua/",
+            }
+        ]
+
+        def handler(_req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"detail": "Success", "data": {"items": ads, "total": 7}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            val = await validate_cross_advertiser_demand(
+                "tyv_abc", "портативний блендер usb", country="UA", min_ad_sets=5, min_days=3, client=client
+            )
+
+        self.assertTrue(val["ok"])
+        self.assertEqual(val["competitor_advertisers"], 3)
+        self.assertEqual(val["total_matching_ads"], 6)
+        self.assertTrue(val["meets_ad_sets_threshold"])
+        self.assertEqual(val["cumulative_active_days"], sum(5 + i for i in range(6)))
+        self.assertEqual(val["total_impressions"], 6000)
 
 
 class TestTyverWebEndpoints(unittest.TestCase):

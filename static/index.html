@@ -336,8 +336,9 @@
 
   <main class="container">
     <nav class="tabs-bar">
-      <button class="tab-btn active" data-tab="radar" type="button">🇺🇦 UA Wholesale Radar</button>
+      <button class="tab-btn active" data-tab="radar" type="button">🇺🇦 5-Stage Ad-First Arbitrage</button>
       <button class="tab-btn" data-tab="tyver" type="button">🎰 Tyver Ad Spy / iGaming</button>
+      <button class="tab-btn" data-tab="yml" type="button">📦 YML Wholesale Feeds</button>
       <button class="tab-btn" data-tab="simulator" type="button">UA COD Profit Simulator</button>
       <button class="tab-btn" data-tab="channels" type="button">UA Telegram Drops</button>
       <button class="tab-btn" data-tab="watchlist" type="button">Watchlist &amp; History</button>
@@ -371,22 +372,22 @@
       <!-- Super-Parser Controls -->
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Ukraine Local Wholesale Super-Parser (Prom Опт · OLX Опт · Bigl · UA Retail Spread)</div>
+          <div class="panel-title">5-Stage Ad-First Arbitrage (Tyver 3+ Days / 5+ Ads → Landing → Exact Retail &amp; Real UA Wholesale)</div>
           <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
             <label class="toggle-wrap">
               <input type="checkbox" id="toggleMock" />
               <span>Offline Demo Mode</span>
             </label>
-            <button class="btn btn-sm" type="button" id="toggleThresholdsBtn">Thresholds ▾</button>
+            <button class="btn btn-sm" type="button" id="toggleThresholdsBtn">Thresholds (3d / 5+) ▾</button>
             <button class="btn btn-sm" type="button" id="toggleBlocksBtn">Source Notes ▾</button>
           </div>
         </div>
 
         <div class="runner-row">
-          <input class="input" id="scanQuery" type="text" placeholder="Search UA keyword (e.g. органайзер, масажер) or blank for all 6 niches..." />
+          <input class="input" id="scanQuery" type="text" placeholder="Optional niche keyword (leave blank for top scaled UA Ad-First products)..." />
           <input class="input mono" id="scanProxy" type="text" placeholder="Optional proxy (http://user:pass@ip:port)" />
-          <button class="btn btn-primary" id="runScanBtn" type="button">Search UA Keyword</button>
-          <button class="btn btn-emerald" id="superParseBtn" type="button">⚡ Super Parse UA Wholesale</button>
+          <button class="btn btn-primary" id="runScanBtn" type="button">Search Keyword</button>
+          <button class="btn btn-emerald" id="superParseBtn" type="button">⚡ Run 5-Stage Ad-First Spy</button>
         </div>
 
         <div class="chips-group" id="categoryChips"><span class="group-label">Categories:</span></div>
@@ -405,8 +406,8 @@
         <div class="diag-strip" id="diagnosticsStrip"></div>
 
         <div class="thresholds-grid" id="thresholdsPanel" style="display:none;">
-          <div class="field"><label for="thMinDays">Min Active Days</label><input class="input" id="thMinDays" type="number" min="0" step="1" /></div>
-          <div class="field"><label for="thMinSets">Min Active Ad Sets</label><input class="input" id="thMinSets" type="number" min="1" step="1" /></div>
+          <div class="field"><label for="thMinDays">Min Active Days (3+)</label><input class="input" id="thMinDays" type="number" min="1" step="1" value="3" /></div>
+          <div class="field"><label for="thMinSets">Min Ad Duplicates (5+)</label><input class="input" id="thMinSets" type="number" min="1" step="1" value="5" /></div>
           <div class="field"><label for="thShipping">Shipping Est ($)</label><input class="input" id="thShipping" type="number" min="0" step="0.1" /></div>
           <div class="field"><label for="thCpa">Cross-Border CPA ($)</label><input class="input" id="thCpa" type="number" min="0" step="0.5" /></div>
           <div class="field"><label for="thWinnerMin">Winner Net Margin ($)</label><input class="input" id="thWinnerMin" type="number" step="0.5" /></div>
@@ -587,6 +588,25 @@
       </div>
     </section>
 
+    <!-- TAB: YML WHOLESALE FEEDS -->
+    <section class="tab-view" id="tab-yml">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Ukrainian YML / XML Dropship &amp; Wholesale Feeds</div>
+            <div class="prod-sub">Connect Prom YML / MyDrop / TopDrop / 7km warehouse XML feed URLs for exact SKU &amp; drop-price matching.</div>
+          </div>
+        </div>
+        <div class="runner-row" style="grid-template-columns:1.4fr 1fr auto auto;">
+          <input class="input" id="ymlUrlInput" type="url" placeholder="https://supplier.com.ua/export/prom.xml" />
+          <input class="input" id="ymlLabelInput" type="text" placeholder="Feed label (e.g. Odesa 7km Warehouse)" />
+          <label class="toggle-wrap"><input type="checkbox" id="ymlTestFetch" checked /><span>Validate XML Offers</span></label>
+          <button class="btn btn-primary" id="addYmlBtn" type="button">Add YML Feed</button>
+        </div>
+        <div class="card-grid" id="ymlFeedsGrid"></div>
+      </section>
+    </section>
+
     <!-- TAB 3: UA TELEGRAM DROP CHANNELS -->
     <section class="tab-view" id="tab-channels">
       <section class="panel">
@@ -650,7 +670,12 @@
       </div>
 
       <div>
-        <div class="section-label">Marketplace Demand &amp; Price Benchmarks</div>
+        <div class="section-label">Stage 3 Competitor Ads Scaling This Product</div>
+        <div class="card-grid" id="drawerCompetitorAds"></div>
+      </div>
+
+      <div>
+        <div class="section-label">Stage 5 Retail Market Benchmarks (Hotline · Prom · OLX)</div>
         <div class="card-grid" id="drawerMarkets"></div>
       </div>
 
@@ -713,6 +738,7 @@
       document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
       document.querySelectorAll('.tab-view').forEach((v) => v.classList.toggle('active', v.id === `tab-${name}`));
       if (name === 'tyver') { loadTyverQuota(); loadTyverFilters(); }
+      if (name === 'yml') loadYmlFeeds();
       if (name === 'channels') loadTgChannels();
       if (name === 'watchlist') { loadWatchlist(); loadHistory(); }
     }
@@ -850,57 +876,62 @@
       gWrap.innerHTML = rows.map((item) => {
         const ad = item.ad, l = item.landing, m = item.margin, e = item.economics || {};
         const score = Number(e.opportunity_score || 0);
-        const model = e.recommended_model || 'UA_COD';
-        const uaProfUsd = Number(e.ua_cod_net_profit_usd || 0);
-        const uaProfUah = Number(item.ua_net_profit_uah ?? e.ua_net_profit_uah ?? (uaProfUsd * 41.67));
-        const wsUah = Number(item.wholesale_uah ?? e.ua_wholesale_price_uah ?? (m.china_wholesale_price_usd * 41.67));
-        const retUah = Number(item.retail_uah ?? e.ua_retail_price_uah ?? (m.retail_price_usd * 41.67));
+        const hasWs = item.wholesale_match_status !== 'none' && item.wholesale_uah != null;
+        const uaProfUsd = hasWs ? Number(e.ua_cod_net_profit_usd || 0) : null;
+        const uaProfUah = hasWs ? Number(item.ua_net_profit_uah ?? e.ua_net_profit_uah ?? 0) : null;
+        const wsUah = hasWs ? Number(item.wholesale_uah) : null;
+        const retUah = item.retail_uah != null ? Number(item.retail_uah) : (m.retail_price_usd > 0 ? Number(m.retail_price_usd * 41.67) : null);
         const pic = imgSrc(item.image_url || l.image_url || ad.ad_creative_image_url);
         const prodUrl = item.product_url || l.final_url || l.url;
-        const supUrl = item.supplier_url || item.prom_wholesale_url || item.bigl_url;
-        const liveTag = (item.is_live ?? ad.is_live)
-          ? '<span class="badge badge-win">LIVE UA</span>'
-          : '<span class="badge badge-warn">DEMO</span>';
-        const soldPill = item.sold_text ? `<span class="badge badge-win">${esc(item.sold_text)}</span>` : '';
-        const ratePill = item.rating ? `<span class="badge">★ ${Number(item.rating).toFixed(1)}</span>` : '';
+        const supUrl = item.supplier_url || item.prom_wholesale_url || item.yml_url || item.bigl_url;
+        const compAds = Number(item.total_matching_ads || ad.active_ad_sets || 1);
+        const compStores = Number(item.competitor_advertisers || 1);
+        const cumDays = Number(item.cumulative_active_days || ad.days_running || 0);
+        const matchTop = (item.suppliers && item.suppliers[0]?.match_score) ? `${Number(item.suppliers[0].match_score).toFixed(0)}% match` : '';
 
         return `
           <article class="product-card" data-ad-id="${esc(ad.ad_id)}">
             <div class="card-media" onclick="openDrawer('${esc(ad.ad_id)}')">
               <img src="${esc(pic)}" alt="${esc(l.title)}" loading="lazy" onerror="this.onerror=null;this.src='${FALLBACK_SVG}'" />
               <div class="media-top-left">
-                ${liveTag}
-                <span class="badge badge-src">${esc(item.source || ad.source)}</span>
+                <span class="badge badge-win">${ad.days_running}d active</span>
+                <span class="badge badge-src">${compAds} ads · ${compStores} stores</span>
               </div>
               <div class="media-top-right">
                 <span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span>
               </div>
               <div class="media-bottom-left">
-                ${item.category ? `<span class="badge">${esc(item.category)}</span>` : ''}
-                ${soldPill}${ratePill}
+                ${l.core_phrase ? `<span class="badge">${esc(l.core_phrase)}</span>` : ''}
+                ${matchTop ? `<span class="badge badge-win">${esc(matchTop)}</span>` : ''}
               </div>
             </div>
             <div class="card-body">
               <div class="card-title" onclick="openDrawer('${esc(ad.ad_id)}')" title="${esc(l.title)}">${esc(l.title || 'Untitled Product')}</div>
               <div class="card-meta">
-                <span>${esc(ad.page_name)}</span>
-                <span class="mono">Опт <b>${wsUah.toFixed(0)}₴</b> → Retail <b>${retUah.toFixed(0)}₴</b></span>
+                <span>${esc(ad.page_name)} · ∑ ${cumDays}d spend</span>
+                <span class="mono">${hasWs ? `Опт <b>${wsUah.toFixed(0)}₴</b> → ` : ''}Retail <b>${retUah != null ? retUah.toFixed(0) + '₴' : '—'}</b></span>
               </div>
+              ${hasWs ? `
               <div class="profit-strip">
                 <div class="profit-box">
-                  <span class="profit-label">UA COD Net (${esc(model)})</span>
+                  <span class="profit-label">UA COD Net (Verified)</span>
                   <span class="profit-val ${uaProfUsd >= 0 ? 'text-win' : 'text-loss'}">${uaProfUah.toFixed(0)}₴ ($${uaProfUsd.toFixed(2)})</span>
                 </div>
                 <div class="profit-box">
                   <span class="profit-label">COD ROI · Spread</span>
-                  <span class="profit-val text-accent">${Number(e.ua_cod_roi_pct || 0).toFixed(0)}% · ${(retUah - wsUah).toFixed(0)}₴</span>
+                  <span class="profit-val text-accent">${Number(e.ua_cod_roi_pct || 0).toFixed(0)}% · ${(retUah != null ? (retUah - wsUah).toFixed(0) + '₴' : '—')}</span>
                 </div>
-              </div>
+              </div>` : `
+              <div class="profit-strip" style="grid-template-columns:1fr;border-color:rgba(245,158,11,0.4);">
+                <div class="profit-box">
+                  <span class="profit-label text-warn">Wholesale Status</span>
+                  <span class="profit-val text-warn" style="font-size:12px;">${esc(item.wholesale_match_note || 'No verified wholesale match yet')}${item.retail_min_uah ? ` · Market: ${Number(item.retail_min_uah).toFixed(0)}₴+` : ''}</span>
+                </div>
+              </div>`}
               <div class="card-links">
-                <a class="btn btn-sm btn-primary" href="${esc(prodUrl)}" target="_blank" rel="noopener noreferrer">Listing ↗</a>
-                ${supUrl && supUrl !== prodUrl ? `<a class="btn btn-sm btn-emerald" href="${esc(supUrl)}" target="_blank" rel="noopener noreferrer">UA Опт ↗</a>` : ''}
-                ${item.prom_wholesale_url && item.prom_wholesale_url !== prodUrl && item.prom_wholesale_url !== supUrl ? `<a class="btn btn-sm" href="${esc(item.prom_wholesale_url)}" target="_blank" rel="noopener noreferrer">Prom Опт ↗</a>` : ''}
-                ${item.bigl_url && item.bigl_url !== prodUrl && item.bigl_url !== supUrl ? `<a class="btn btn-sm" href="${esc(item.bigl_url)}" target="_blank" rel="noopener noreferrer">Bigl ↗</a>` : ''}
+                <a class="btn btn-sm btn-primary" href="${esc(prodUrl)}" target="_blank" rel="noopener noreferrer">Ad Landing ↗</a>
+                ${hasWs && supUrl && supUrl !== prodUrl ? `<a class="btn btn-sm btn-emerald" href="${esc(supUrl)}" target="_blank" rel="noopener noreferrer">Verified Опт ↗</a>` : ''}
+                ${item.prom_url && item.prom_url !== prodUrl ? `<a class="btn btn-sm" href="${esc(item.prom_url)}" target="_blank" rel="noopener noreferrer">Prom ↗</a>` : ''}
                 <button class="btn btn-sm" onclick="openDrawer('${esc(ad.ad_id)}')" type="button">Inspect</button>
                 <button class="btn btn-sm btn-win" onclick="saveWatchlistItem('${esc(ad.ad_id)}')" type="button">★</button>
               </div>
@@ -913,11 +944,9 @@
         const score = Number(e.opportunity_score || 0);
         const pic = imgSrc(item.image_url || l.image_url);
         const prodUrl = item.product_url || l.final_url || l.url;
-        const supUrl = item.supplier_url || item.prom_wholesale_url || item.bigl_url;
-        const uaProfUsd = Number(e.ua_cod_net_profit_usd || 0);
-        const uaProfUah = Number(item.ua_net_profit_uah ?? e.ua_net_profit_uah ?? (uaProfUsd * 41.67));
-        const wsUah = Number(item.wholesale_uah ?? e.ua_wholesale_price_uah ?? (m.china_wholesale_price_usd * 41.67));
-        const retUah = Number(item.retail_uah ?? e.ua_retail_price_uah ?? (m.retail_price_usd * 41.67));
+        const supUrl = item.supplier_url || item.prom_wholesale_url || item.yml_url;
+        const hasWs = item.wholesale_match_status !== 'none' && item.wholesale_uah != null;
+        const retUah = item.retail_uah != null ? `${Number(item.retail_uah).toFixed(0)}₴` : '—';
         return `
           <tr onclick="openDrawer('${esc(ad.ad_id)}')">
             <td>
@@ -925,17 +954,17 @@
                 <img class="prod-thumb" src="${esc(pic)}" alt="" onerror="this.onerror=null;this.src='${FALLBACK_SVG}'" />
                 <div>
                   <div class="prod-title">${esc(l.title || 'Untitled')}</div>
-                  <div class="prod-sub">${esc(ad.page_name)}</div>
+                  <div class="prod-sub">${esc(ad.page_name)} · ${ad.days_running}d · ${Number(item.total_matching_ads || 1)} ads</div>
                 </div>
               </div>
             </td>
-            <td><span class="badge badge-src">${esc(item.source || ad.source)}</span> <span class="prod-sub">${esc(item.category || '')}</span></td>
-            <td><span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span> <span class="badge">${esc(e.recommended_model || 'UA_COD')}</span></td>
-            <td class="mono">${uaProfUah.toFixed(0)}₴ ($${uaProfUsd.toFixed(2)})</td>
-            <td class="mono">${wsUah.toFixed(0)}₴ → ${retUah.toFixed(0)}₴</td>
+            <td><span class="badge badge-src">${esc(item.source || ad.source)}</span> <span class="prod-sub">${esc(l.core_phrase || item.category || '')}</span></td>
+            <td><span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span> <span class="badge">${esc(e.recommended_model || 'UNVERIFIED')}</span></td>
+            <td class="mono">${hasWs ? `${Number(item.ua_net_profit_uah || 0).toFixed(0)}₴ ($${Number(e.ua_cod_net_profit_usd || 0).toFixed(2)})` : '<span class="text-warn">No verified wholesale</span>'}</td>
+            <td class="mono">${hasWs ? `${Number(item.wholesale_uah).toFixed(0)}₴ → ${retUah}` : `Retail ${retUah}`}</td>
             <td onclick="event.stopPropagation()">
               <a class="btn btn-sm" href="${esc(prodUrl)}" target="_blank" rel="noopener noreferrer">Open ↗</a>
-              ${supUrl && supUrl !== prodUrl ? `<a class="btn btn-sm" href="${esc(supUrl)}" target="_blank" rel="noopener noreferrer">Опт ↗</a>` : ''}
+              ${hasWs && supUrl && supUrl !== prodUrl ? `<a class="btn btn-sm" href="${esc(supUrl)}" target="_blank" rel="noopener noreferrer">Опт ↗</a>` : ''}
               <button class="btn btn-sm btn-win" onclick="saveWatchlistItem('${esc(ad.ad_id)}')" type="button">★</button>
             </td>
           </tr>`;
@@ -965,6 +994,18 @@
         <div class="wf-row total"><span>Composite Opportunity Score</span><span class="mono">${Number(e.opportunity_score || 0).toFixed(1)} / 100</span></div>
       `;
 
+      const compAds = item.competitor_ads || [];
+      $('drawerCompetitorAds').innerHTML = compAds.length ? compAds.map((c) => `
+        <div class="mini-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${esc(c.page_name || 'Advertiser')}</strong>
+            <span class="badge badge-win">${Number(c.activity_days || 0)}d</span>
+          </div>
+          <div class="prod-sub">${esc(c.domain || '')} · ${esc(c.cta || '')}</div>
+          ${c.landing_url ? `<a href="${esc(c.landing_url)}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">Open Ad Store ↗</a>` : ''}
+        </div>
+      `).join('') : `<div class="prod-sub">${Number(item.total_matching_ads || 1)} matching ads across ${Number(item.competitor_advertisers || 1)} store(s).</div>`;
+
       const mkts = item.marketplace_signals || [];
       $('drawerMarkets').innerHTML = mkts.length ? mkts.map((s) => `
         <div class="mini-card">
@@ -975,15 +1016,16 @@
           <div class="mono" style="font-size:13px;">Median: ${s.median_price ? `${s.median_price} ${esc(s.currency)} ($${s.median_price_usd})` : 'N/A'}</div>
           ${s.top_sample_url ? `<a href="${esc(s.top_sample_url)}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">Open Sample ↗</a>` : ''}
         </div>
-      `).join('') : '<div class="prod-sub">No marketplace benchmarks attached.</div>';
+      `).join('') : '<div class="prod-sub">No marketplace benchmarks matched strictly.</div>';
 
       const sups = item.suppliers || [];
       $('drawerSuppliers').innerHTML = sups.length ? sups.map((s, idx) => {
         const uahStr = s.wholesale_price_uah ? `${Number(s.wholesale_price_uah).toFixed(0)}₴ ($${Number(s.wholesale_price_usd).toFixed(2)})` : `$${Number(s.wholesale_price_usd).toFixed(2)}`;
+        const matchTag = s.match_score ? `<span class="badge badge-win">${esc(s.match_label || 'Match')} ${Number(s.match_score).toFixed(0)}%</span>` : '';
         return `
         <div class="supplier-card ${idx === 0 ? 'best' : ''}">
           <div class="supplier-top">
-            <strong>${esc(s.supplier_name)} <span class="badge badge-src">${esc(s.source)}</span></strong>
+            <strong>${esc(s.supplier_name)} <span class="badge badge-src">${esc(s.source)}</span> ${matchTag}</strong>
             <span class="mono text-win">${uahStr}</span>
           </div>
           <div class="prod-sub">${esc(s.product_title)}</div>
@@ -992,7 +1034,7 @@
             <a href="${esc(s.product_url)}" target="_blank" rel="noopener noreferrer">Open Supplier ↗</a>
           </div>
         </div>
-      `; }).join('') : '<div class="prod-sub">No UA local wholesale suppliers matched yet.</div>';
+      `; }).join('') : `<div class="prod-sub">${esc(item.wholesale_match_note || 'No verified wholesale match yet')}</div>`;
 
       const tgs = item.tg_offers || [];
       $('drawerTgOffers').innerHTML = tgs.length ? tgs.map((t) => `
@@ -1176,7 +1218,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            query: superMode ? '' : $('scanQuery').value.trim(),
+            query: $('scanQuery').value.trim(),
             categories: cats.length ? cats : null,
             super_parse: superMode,
             geo: $('trendsGeo').value,
@@ -1391,7 +1433,45 @@
       }).join('');
     }
 
+    async function loadYmlFeeds() {
+      const res = await fetch(apiUrl('/api/yml-feeds'));
+      const list = (await res.json()).feeds || [];
+      $('ymlFeedsGrid').innerHTML = list.length ? list.map((f) => `
+        <div class="mini-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${esc(f.label)}</strong>
+            <button class="btn btn-sm btn-loss" onclick="removeYmlFeed('${esc(f.url)}')" type="button">Remove</button>
+          </div>
+          <div class="prod-sub mono">${Number(f.last_count || 0)} XML offers</div>
+          <a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;word-break:break-all;">${esc(f.url)} ↗</a>
+        </div>
+      `).join('') : '<div class="prod-sub">No YML feeds added yet. Paste a supplier Prom YML / XML link above.</div>';
+    }
+
+    async function addYmlFeed() {
+      const url = $('ymlUrlInput').value.trim();
+      if (!url) return;
+      const res = await fetch(apiUrl('/api/yml-feeds'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, label: $('ymlLabelInput').value.trim(), enabled: true, test_fetch: $('ymlTestFetch').checked }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.detail || 'Invalid YML URL', false); return; }
+      $('ymlUrlInput').value = '';
+      $('ymlLabelInput').value = '';
+      showToast(`YML Feed saved${data.offer_count != null ? ` (${data.offer_count} XML offers parsed)` : ''}.`, true);
+      loadYmlFeeds();
+    }
+
+    async function removeYmlFeed(url) {
+      await fetch(apiUrl(`/api/yml-feeds?url=${encodeURIComponent(url)}`), { method: 'DELETE' });
+      loadYmlFeeds();
+    }
+    window.removeYmlFeed = removeYmlFeed;
+
     document.querySelectorAll('.tab-btn').forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
+    $('addYmlBtn').onclick = addYmlFeed;
     $('tyverModeIgamingBtn').onclick = () => setTyverMode('igaming');
     $('tyverModeEcomBtn').onclick = () => setTyverMode('ecom_ua');
     $('tyverSearchBtn').onclick = () => searchTyver(false);

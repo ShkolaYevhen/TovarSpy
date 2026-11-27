@@ -4,9 +4,11 @@ from unittest.mock import AsyncMock, MagicMock
 from landing_parser import (
     detect_platform,
     fetch_landing_page,
+    fetch_landing_page_fast,
     parse_landing_html,
     parse_landings,
 )
+import httpx
 
 
 class TestLandingParser(unittest.IsolatedAsyncioTestCase):
@@ -139,6 +141,34 @@ class TestLandingParser(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0].currency, "PLN")
         self.assertEqual(results[1].platform, "Cartum/Horoshop")
+
+    async def test_stage2_core_phrase_old_price_skip_and_fast_fetch(self) -> None:
+        html = """
+        <html>
+          <head><meta property="og:title" content="Акція -50%! Ударний масажер Lenovo L-FAN003 Нова Пошта" /></head>
+          <body>
+            <img src="https://shop.ua/logo.svg" />
+            <img class="product-image" src="https://shop.ua/media/lenovo-lfan003.jpg" />
+            <del>2 400 грн</del>
+            <div class="current-price">від 99 ₴ /міс 1 290 грн</div>
+          </body>
+        </html>
+        """
+        parsed = parse_landing_html(html, "https://shop.ua/lenovo")
+        self.assertEqual(parsed.model_code, "l-fan003")
+        self.assertIn("масажер", parsed.core_phrase)
+        self.assertNotIn("акція", parsed.core_phrase)
+        self.assertAlmostEqual(parsed.price or 0.0, 1290.0)
+        self.assertEqual(parsed.currency, "UAH")
+        self.assertEqual(parsed.image_url, "https://shop.ua/media/lenovo-lfan003.jpg")
+
+        def handler(_req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=html)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            fast = await fetch_landing_page_fast("https://shop.ua/lenovo", client=client)
+        self.assertAlmostEqual(fast.price or 0.0, 1290.0)
+        self.assertEqual(fast.model_code, "l-fan003")
 
 
 if __name__ == "__main__":

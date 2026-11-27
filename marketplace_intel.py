@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 from statistics import median
@@ -16,6 +17,7 @@ from config import (
     SupplierOffer,
     get_httpx_proxy,
 )
+from product_matcher import compute_dhash, evaluate_product_match
 from storage import get_cache, set_cache
 
 logger = logging.getLogger(__name__)
@@ -890,3 +892,336 @@ async def fetch_live_marketplace_products(
         all_items.extend(items)
         diagnostics[plat] = status_msg
     return all_items, diagnostics
+
+
+def parse_hotline_items(html: str, query: str, limit: int = 8) -> list[dict[str, Any]]:
+    """Extract Hotline.ua comparison cards with UAH price range, offer count, photo, and link."""
+    if not html or _is_blocked_html(html):
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    uah_rate = DEFAULT_FX_RATES_TO_USD.get("UAH", 0.024)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for card in soup.select(".list-item, [class*='list-item--']"):
+        title_link = None
+        title = ""
+        for a in card.select('a[href*="/ua/"]'):
+            txt = a.get_text(" ", strip=True)
+            if txt and "акц" not in txt.lower() and "пропозиц" not in txt.lower() and len(txt) >= 4:
+                title_link = a
+                title = txt
+                break
+        if not title_link:
+            img_alt = card.select_one("img[alt]")
+            a_img = card.select_one('a[href*="/ua/"]')
+            if img_alt and a_img:
+                title = str(img_alt.get("alt") or "").strip()
+                title_link = a_img
+        if not title or not title_link:
+            continue
+
+        href = urljoin("https://hotline.ua", str(title_link.get("href") or "")).split("?")[0]
+        if not href or href in seen:
+            continue
+
+        clean_text = _strip_installment_text(card.get_text(" ", strip=True)).replace(title, " ")
+        m_range = re.search(
+            r"\b(\d{1,3}(?:[\s\u00a0]\d{3})+|\d+(?:[.,]\d{1,2})?)\s*(?:[–-]\s*(\d{1,3}(?:[\s\u00a0]\d{3})+|\d+(?:[.,]\d{1,2})?))?\s*₴",
+            clean_text,
+        )
+        if not m_range:
+            continue
+        p_min = _parse_float(m_range.group(1))
+        p_max = _parse_float(m_range.group(2)) if m_range.group(2) else p_min
+        if p_min is None or p_min < 20.0:
+            continue
+
+        offers_m = re.search(r"(?:(\d+)\s*пропозиц|пропозиц[іїй]+\s*\(?(\d+)\)?)", clean_text, re.I)
+        offers_cnt = int(offers_m.group(1) or offers_m.group(2)) if offers_m else 1
+        img_el = card.find("img")
+        img_url = ""
+        if img_el:
+            raw_src = str(img_el.get("src") or img_el.get("data-src") or "").strip()
+            if raw_src:
+                img_url = urljoin("https://hotline.ua", raw_src)
+
+        seen.add(href)
+        items.append({
+            "source": "hotline_ua",
+            "country": "UA",
+            "query": query,
+            "title": title[:160],
+            "price": p_min,
+            "price_max": p_max or p_min,
+            "currency": "UAH",
+            "price_usd": round(p_min * uah_rate, 2),
+            "offer_count": offers_cnt,
+            "image_url": img_url,
+            "product_url": href,
+            "seller_name": f"Hotline ({offers_cnt} shops)",
+            "is_live": True,
+        })
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _walk_prom_wholesale_nodes(node: Any) -> list[dict[str, Any]]:
+    """Find Prom.ua embedded Product JSON objects carrying a non-empty wholesalePrices array."""
+    found: list[dict[str, Any]] = []
+    if isinstance(node, dict):
+        ws = node.get("wholesalePrices")
+        if isinstance(ws, list) and len(ws) > 0 and (node.get("name") or node.get("model")):
+            found.append(node)
+        for val in node.values():
+            if isinstance(val, (dict, list)):
+                found.extend(_walk_prom_wholesale_nodes(val))
+    elif isinstance(node, list):
+        for elem in node:
+            if isinstance(elem, (dict, list)):
+                found.extend(_walk_prom_wholesale_nodes(elem))
+    return found
+
+
+def parse_prom_wholesale_tiers(html: str, query: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Extract ONLY real Prom.ua listings with populated wholesalePrices tiers (never wholesalePrices=[])."""
+    if not html or _is_blocked_html(html):
+        return []
+
+    uah_rate = DEFAULT_FX_RATES_TO_USD.get("UAH", 0.024)
+    soup = BeautifulSoup(html, "html.parser")
+    results: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+
+    # 1. Inspect embedded Apollo/Redux JSON scripts for populated wholesalePrices arrays
+    for script in soup.find_all("script"):
+        raw = script.string or ""
+        if '"wholesalePrices"' not in raw:
+            continue
+        start_idx = raw.find("{")
+        while start_idx != -1:
+            try:
+                obj, end_offset = json.JSONDecoder().raw_decode(raw[start_idx:])
+                for pnode in _walk_prom_wholesale_nodes(obj):
+                    ws_entries = [w for w in (pnode.get("wholesalePrices") or []) if isinstance(w, dict)]
+                    tier_prices: list[float] = []
+                    tier_moqs: list[int] = []
+                    for w in ws_entries:
+                        pv = _parse_float(str(w.get("price") or ""))
+                        if pv is not None and pv > 0:
+                            tier_prices.append(pv)
+                            q_val = w.get("minimumOrderQuantity") or w.get("minQuantity") or w.get("quantity") or 2
+                            try:
+                                tier_moqs.append(max(2, int(float(str(q_val)))))
+                            except ValueError:
+                                tier_moqs.append(2)
+                    if not tier_prices:
+                        continue
+
+                    min_ws = min(tier_prices)
+                    min_moq = tier_moqs[tier_prices.index(min_ws)] if tier_moqs else 2
+                    model_obj = pnode.get("model") if isinstance(pnode.get("model"), dict) else {}
+                    title = str(pnode.get("name") or model_obj.get("name") or "").strip()
+                    if not title:
+                        continue
+
+                    pid = str(pnode.get("id") or "").strip()
+                    url_text = str(pnode.get("urlText") or model_obj.get("urlText") or "product").strip()
+                    raw_url = str(pnode.get("urlForProductCatalog") or pnode.get("url") or "").strip()
+                    href = urljoin("https://prom.ua", raw_url) if raw_url else (
+                        f"https://prom.ua/ua/p{pid}-{url_text}.html" if pid else "https://prom.ua"
+                    )
+                    if href in seen_urls:
+                        continue
+                    seen_urls.add(href)
+
+                    imgs = model_obj.get("images400x400") or model_obj.get("images") or pnode.get("images") or []
+                    img_url = str(imgs[0]) if isinstance(imgs, list) and imgs else str(pnode.get("mainImage") or "")
+                    comp = pnode.get("company") if isinstance(pnode.get("company"), dict) else {}
+                    seller = str(comp.get("name") or "Prom Wholesale Supplier")
+
+                    results.append({
+                        "source": "prom_wholesale",
+                        "supplier_type": "ua_wholesale",
+                        "country": "UA",
+                        "query": query,
+                        "title": title[:180],
+                        "price": round(min_ws, 2),
+                        "currency": "UAH",
+                        "price_usd": round(min_ws * uah_rate, 2),
+                        "moq": min_moq,
+                        "image_url": img_url,
+                        "product_url": href,
+                        "seller_name": seller[:100],
+                        "tier_note": f"Опт від {min_moq} шт",
+                        "is_live": True,
+                    })
+                start_idx = raw.find("{", start_idx + max(1, end_offset))
+            except Exception:
+                break
+        if len(results) >= limit:
+            return results[:limit]
+
+    # 2. Fallback DOM cards ONLY if explicit wholesale qty tier text ("від N шт") appears on card
+    for card in soup.select('[data-qaid="product_block"]'):
+        card_text = card.get_text(" ", strip=True)
+        tier_m = re.search(r"(\d[\d\s\u00a0]*(?:[.,]\d{1,2})?)\s*(?:₴|грн)[^\n]{0,24}від\s*(\d+)\s*шт", card_text, re.I)
+        if not tier_m:
+            continue
+        title_el = card.select_one('[data-qaid="product_name"]')
+        link_el = card.select_one('a[href*="/p"]') or card.select_one("a[href]")
+        if not title_el or not link_el:
+            continue
+        href = urljoin("https://prom.ua", str(link_el["href"]))
+        if href in seen_urls:
+            continue
+        price_val = _parse_float(tier_m.group(1))
+        moq = max(2, int(tier_m.group(2)))
+        if not price_val:
+            continue
+        img_el = card.find("img")
+        img_url = str(img_el.get("src") or img_el.get("data-src") or "").strip() if img_el else ""
+        seller_el = card.select_one('[data-qaid="company_name"]')
+        seller = seller_el.get_text(" ", strip=True) if seller_el else "Prom Wholesale"
+        seen_urls.add(href)
+        results.append({
+            "source": "prom_wholesale",
+            "supplier_type": "ua_wholesale",
+            "country": "UA",
+            "query": query,
+            "title": title_el.get_text(" ", strip=True)[:180],
+            "price": price_val,
+            "currency": "UAH",
+            "price_usd": round(price_val * uah_rate, 2),
+            "moq": moq,
+            "image_url": img_url,
+            "product_url": href,
+            "seller_name": seller[:100],
+            "tier_note": f"Опт від {moq} шт",
+            "is_live": True,
+        })
+        if len(results) >= limit:
+            break
+
+    return results[:limit]
+
+
+async def _fetch_image_dhash(url: Optional[str], http_client: httpx.AsyncClient) -> Optional[int]:
+    """Download thumbnail bytes safely to compute Pillow dHash (returns None on error)."""
+    if not url or not url.startswith(("http://", "https://")):
+        return None
+    try:
+        resp = await http_client.get(url, timeout=6.0)
+        if resp.status_code == 200 and len(resp.content) <= 2_500_000:
+            return compute_dhash(resp.content)
+    except Exception:
+        pass
+    return None
+
+
+async def fetch_ua_retail_benchmark(
+    core_phrase: str,
+    target_title: str,
+    target_price_uah: Optional[float],
+    settings: Settings,
+    ref_image_url: Optional[str] = None,
+    ref_dhash: Optional[int] = None,
+    client: Optional[httpx.AsyncClient] = None,
+) -> dict[str, Any]:
+    """Stage 5 Retail Benchmark: query Hotline.ua, Prom.ua, and OLX.ua gated by product_matcher."""
+    clean_q = (core_phrase or target_title or "").strip()
+    if not clean_q:
+        return {"items": [], "signals": [], "retail_min_uah": None, "retail_median_uah": None, "retail_max_uah": None, "diagnostics": {}}
+
+    q_enc = quote_plus(clean_q)
+    q_slug = quote_plus(clean_q).replace("+", "-")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36",
+        "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.7",
+    }
+
+    async def _run(http_client: httpx.AsyncClient) -> tuple[Optional[int], list[tuple[str, list[dict[str, Any]], str]]]:
+        active_dhash = ref_dhash if ref_dhash is not None else await _fetch_image_dhash(ref_image_url, http_client)
+
+        async def _get(plat: str, url: str, parser: Any) -> tuple[str, list[dict[str, Any]], str]:
+            try:
+                r = await http_client.get(url, headers=headers)
+                if r.status_code != 200:
+                    return plat, [], f"HTTP {r.status_code}"
+                parsed = parser(r.text)
+                return plat, parsed, f"raw: {len(parsed)}"
+            except httpx.HTTPError as exc:
+                return plat, [], f"error: {type(exc).__name__}"
+
+        batches = await asyncio.gather(
+            _get("hotline_ua", f"https://hotline.ua/ua/sr/?q={q_enc}", lambda h: parse_hotline_items(h, clean_q)),
+            _get("prom_ua", f"https://prom.ua/ua/search?search_term={q_enc}", lambda h: parse_prom_items(h, clean_q)),
+            _get("olx_ua", f"https://www.olx.ua/uk/list/q-{q_slug}/", lambda h: parse_olx_items(h, clean_q, domain="ua")),
+        )
+        return active_dhash, list(batches)
+
+    if client is not None:
+        resolved_dhash, batches = await _run(client)
+    else:
+        proxy = get_httpx_proxy(settings)
+        async with httpx.AsyncClient(timeout=15.0, proxy=proxy, follow_redirects=True) as owned:
+            resolved_dhash, batches = await _run(owned)
+
+    ref_name = (target_title or clean_q).strip()
+    verified: list[dict[str, Any]] = []
+    signals: list[MarketplaceSignal] = []
+    diagnostics: dict[str, str] = {}
+
+    for plat, raw_items, status_msg in batches:
+        plat_matched: list[dict[str, Any]] = []
+        for it in raw_items:
+            verdict = evaluate_product_match(
+                ref_name,
+                it["title"],
+                ref_price_uah=target_price_uah,
+                cand_price_uah=float(it["price"]),
+                candidate_role="retail",
+            )
+            if not verdict.is_match:
+                continue
+            it["match_score"] = verdict.score
+            it["match_label"] = verdict.label
+            plat_matched.append(it)
+            verified.append(it)
+
+        diagnostics[plat] = f"matched: {len(plat_matched)}/{len(raw_items)}" if raw_items else status_msg
+        if plat_matched:
+            prices = sorted(float(x["price"]) for x in plat_matched)
+            med = prices[len(prices) // 2]
+            uah_rate = settings.FX_RATES_TO_USD.get("UAH", 0.024)
+            signals.append(
+                MarketplaceSignal(
+                    source=plat,
+                    platform=plat,
+                    country="UA",
+                    query=clean_q,
+                    listing_count=len(plat_matched),
+                    median_price=med,
+                    min_price=prices[0],
+                    max_price=prices[-1],
+                    currency="UAH",
+                    median_price_usd=round(med * uah_rate, 2),
+                    sold_velocity_score=min(90.0, float(sum(int(x.get("offer_count") or 1) for x in plat_matched) * 8)),
+                    seller_density=len(plat_matched),
+                    seller_count=len(plat_matched),
+                    top_sample_url=plat_matched[0].get("product_url"),
+                    status="live",
+                )
+            )
+
+    all_prices = sorted(float(x["price"]) for x in verified)
+    return {
+        "ref_dhash": resolved_dhash,
+        "items": sorted(verified, key=lambda x: -float(x.get("match_score") or 0)),
+        "signals": signals,
+        "retail_min_uah": all_prices[0] if all_prices else None,
+        "retail_median_uah": all_prices[len(all_prices) // 2] if all_prices else None,
+        "retail_max_uah": all_prices[-1] if all_prices else None,
+        "diagnostics": diagnostics,
+    }

@@ -18,7 +18,7 @@ class TestConfigAndModels(unittest.TestCase):
     def test_settings_defaults(self) -> None:
         settings = Settings(_env_file=None)
         self.assertEqual(settings.TARGET_COUNTRIES, ["UA", "PL", "RO", "CZ", "DE", "US"])
-        self.assertEqual(settings.MIN_DURATION_DAYS, 7)
+        self.assertEqual(settings.MIN_DURATION_DAYS, 3)
         self.assertEqual(settings.MIN_ACTIVE_AD_SETS, 5)
         self.assertAlmostEqual(settings.SHIPPING_COST_EST_USD, 2.50)
         self.assertAlmostEqual(settings.EST_CPA_USD, 6.00)

@@ -6,11 +6,21 @@ from typing import Any, Optional
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
+import httpx
 from playwright.async_api import async_playwright
 
-from config import LandingPageData, make_product_placeholder_svg
+from config import DEFAULT_FX_RATES_TO_USD, LandingPageData, make_product_placeholder_svg
+from product_matcher import extract_core_phrase, extract_model_tokens
 
 logger = logging.getLogger(__name__)
+
+_SKIP_IMAGE_MARKERS: tuple[str, ...] = (
+    "favicon", "logo", "sprite", "pixel", "1x1", "spacer", "badge", "icon", ".svg", "data:image/svg",
+)
+_INSTALLMENT_STRIP_RE = re.compile(
+    r"(?:від|от)?\s*\d[\d\s\u00a0]*(?:[.,]\d{1,2})?\s*(?:₴|грн\.?|UAH)?\s*/\s*міс(?:\.|яц[ьі]?)?",
+    re.IGNORECASE,
+)
 
 _CURRENCY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
@@ -152,14 +162,26 @@ def _extract_price_and_currency(soup: BeautifulSoup) -> tuple[Optional[float], O
     if ld_price is not None:
         return ld_price, ld_curr
 
-    # 3. Targeted price containers, then full document text
+    # 3. Targeted active price containers (skipping <del>/<s>/old-price nodes and /міс installments)
     candidates: list[str] = []
-    for selector in ("[itemprop='price']", ".price", ".product-price", ".offer-price", ".t-store__card__price"):
+    for selector in (
+        "[itemprop='price']",
+        ".price-new",
+        ".current-price",
+        ".product-price",
+        ".offer-price",
+        ".t-store__card__price",
+        ".price",
+    ):
         for node in soup.select(selector):
             text = node.get("content") or node.get_text(" ", strip=True)
             if text:
-                candidates.append(str(text))
-    candidates.append(soup.get_text(" ", strip=True))
+                candidates.append(_INSTALLMENT_STRIP_RE.sub(" ", str(text)))
+
+    body_clone = BeautifulSoup(str(soup), "html.parser")
+    for old_tag in body_clone.select("del, s, strike, .old-price, .price-old, [class*='old-price'], [class*='compare']"):
+        old_tag.decompose()
+    candidates.append(_INSTALLMENT_STRIP_RE.sub(" ", body_clone.get_text(" ", strip=True)))
 
     for text in candidates:
         for currency_code, pattern in _CURRENCY_PATTERNS:
@@ -191,42 +213,116 @@ def _extract_title(soup: BeautifulSoup) -> Optional[str]:
     return None
 
 
+def _is_usable_hero_img(url: str) -> bool:
+    low = (url or "").strip().lower()
+    if not low or any(m in low for m in _SKIP_IMAGE_MARKERS):
+        return False
+    return True
+
+
 def _extract_image_url(soup: BeautifulSoup, base_url: str) -> Optional[str]:
-    """Extract primary product image URL and resolve relative paths."""
+    """Extract primary hero product image URL skipping icons/logos/tracking pixels."""
     og_img = soup.find("meta", attrs={"property": "og:image"})
     if og_img and og_img.get("content"):
-        return urljoin(base_url, str(og_img["content"]).strip())
+        resolved = urljoin(base_url, str(og_img["content"]).strip())
+        if _is_usable_hero_img(resolved):
+            return resolved
 
     _, _, ld_img = _extract_from_json_ld(soup)
     if ld_img:
-        return urljoin(base_url, ld_img.strip())
+        resolved = urljoin(base_url, ld_img.strip())
+        if _is_usable_hero_img(resolved):
+            return resolved
 
     for selector in ("img.product-image", ".product-slider img", ".gallery img", "main img", "img"):
-        img = soup.select_one(selector)
-        if img:
+        for img in soup.select(selector):
             raw_src = img.get("src") or img.get("data-src") or img.get("data-original")
-            if raw_src:
-                return urljoin(base_url, str(raw_src).strip())
+            if not raw_src:
+                continue
+            resolved = urljoin(base_url, str(raw_src).strip())
+            if _is_usable_hero_img(resolved):
+                return resolved
     return None
 
 
 def parse_landing_html(html: str, url: str) -> LandingPageData:
-    """Parse HTML string into structured LandingPageData."""
+    """Parse HTML string into structured LandingPageData with core_phrase & model_code."""
     soup = BeautifulSoup(html, "html.parser")
-    title = _extract_title(soup)
+    raw_title = _extract_title(soup)
     price, currency = _extract_price_and_currency(soup)
     image_url = _extract_image_url(soup, url)
     platform = detect_platform(html, url)
 
+    core_phrase = extract_core_phrase(raw_title or "", max_words=4)
+    models = sorted(extract_model_tokens(raw_title or ""))
+    model_code = models[0] if models else ""
+
     return LandingPageData(
         url=url,
         final_url=url,
-        title=title,
+        title=raw_title,
         price=price,
         currency=currency,
         image_url=image_url,
         platform=platform,
+        core_phrase=core_phrase,
+        model_code=model_code,
     )
+
+
+async def fetch_landing_page_fast(
+    url: str,
+    client: Optional[httpx.AsyncClient] = None,
+    timeout_s: float = 10.0,
+    browser: Any = None,
+) -> LandingPageData:
+    """Try fast HTTPX fetch first, falling back to Playwright only when HTML lacks title/price."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36",
+        "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.7",
+    }
+
+    async def _get_html(http_client: httpx.AsyncClient) -> Optional[LandingPageData]:
+        try:
+            resp = await http_client.get(url, headers=headers)
+            if resp.status_code == 200 and resp.text:
+                parsed = parse_landing_html(resp.text, str(resp.url))
+                parsed.url = url
+                parsed.final_url = str(resp.url)
+                if parsed.title and parsed.price:
+                    return parsed
+                return parsed
+        except httpx.HTTPError:
+            pass
+        return None
+
+    parsed_fast: Optional[LandingPageData] = None
+    if client is not None:
+        parsed_fast = await _get_html(client)
+    else:
+        async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True) as owned:
+            parsed_fast = await _get_html(owned)
+
+    if parsed_fast is not None and parsed_fast.title and (parsed_fast.price or parsed_fast.image_url):
+        return parsed_fast
+
+    try:
+        return await fetch_landing_page(url, timeout_ms=int(timeout_s * 1000), browser=browser)
+    except Exception:
+        return parsed_fast or LandingPageData(url=url, final_url=url, platform="Custom PHP")
+
+
+def to_uah(price: Optional[float], currency: Optional[str], usd_to_uah: float = 41.67) -> Optional[float]:
+    """Convert any parsed landing price to UAH using DEFAULT_FX_RATES_TO_USD."""
+    if price is None or price <= 0:
+        return None
+    code = (currency or "UAH").strip().upper()
+    if code == "UAH":
+        return round(price, 2)
+    fx = DEFAULT_FX_RATES_TO_USD.get(code)
+    if fx is None:
+        return None
+    return round(price * fx * usd_to_uah, 2)
 
 
 async def fetch_landing_page(

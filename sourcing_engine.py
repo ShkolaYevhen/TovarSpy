@@ -18,8 +18,10 @@ from config import (
     get_httpx_proxy,
     make_product_placeholder_svg,
 )
-from marketplace_intel import fetch_ua_wholesale_offers
+from marketplace_intel import _fetch_image_dhash, fetch_ua_wholesale_offers, parse_prom_wholesale_tiers
+from product_matcher import evaluate_product_match
 from storage import get_cache, list_tg_channels, seed_default_channels, set_cache
+from yml_feed_manager import search_yml_offers
 
 logger = logging.getLogger(__name__)
 
@@ -668,3 +670,160 @@ async def find_suppliers(
     """Compatibility helper returning China supplier offers."""
     res = await find_zero_cost_suppliers(product_title, image_url, settings, mock=mock)
     return res["china_offers"]
+
+
+async def find_verified_ua_wholesale(
+    core_phrase: str,
+    target_title: str,
+    target_price_uah: Optional[float],
+    settings: Settings,
+    *,
+    ref_image_url: Optional[str] = None,
+    ref_dhash: Optional[int] = None,
+    client: Optional[httpx.AsyncClient] = None,
+) -> dict[str, Any]:
+    """Stage 5 Real UA Wholesale: Prom real wholesalePrices tiers + YML feeds + TG drop channels only."""
+    clean_q = (core_phrase or target_title or "").strip()
+    ref_name = (target_title or clean_q).strip()
+    if not clean_q:
+        return {
+            "offers": [],
+            "tg_offers": [],
+            "wholesale_match_status": "none",
+            "wholesale_match_note": "No verified wholesale match yet",
+            "diagnostics": {},
+        }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36",
+        "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.7",
+    }
+    uah_rate = settings.FX_RATES_TO_USD.get("UAH", 0.024)
+
+    async def _fetch_prom_tiers(http_client: httpx.AsyncClient) -> tuple[list[dict[str, Any]], str]:
+        url = f"https://prom.ua/ua/search?search_term={quote_plus(clean_q)}&sale_type=wholesale"
+        try:
+            resp = await http_client.get(url, headers=headers)
+            if resp.status_code != 200:
+                return [], f"HTTP {resp.status_code}"
+            if _is_blocked(resp.text):
+                return [], "blocked"
+            parsed = parse_prom_wholesale_tiers(resp.text, clean_q, limit=10)
+            return parsed, f"tiers: {len(parsed)}" if parsed else "0 real wholesalePrices"
+        except httpx.HTTPError as exc:
+            return [], f"error: {type(exc).__name__}"
+
+    async def _run(http_client: httpx.AsyncClient) -> tuple[Optional[int], list[dict[str, Any]], str, list[SupplierOffer], str, list[TelegramDropOffer]]:
+        active_dhash = ref_dhash if ref_dhash is not None else await _fetch_image_dhash(ref_image_url, http_client)
+        prom_task = _fetch_prom_tiers(http_client)
+        yml_task = search_yml_offers(clean_q, ref_name, target_price_uah, settings, ref_dhash=active_dhash, client=http_client)
+        tg_task = search_telegram_dropshipping(clean_q, settings, client=http_client)
+        (prom_raw, prom_diag), (yml_offers, yml_diag), tg_raw = await asyncio.gather(prom_task, yml_task, tg_task)
+        return active_dhash, prom_raw, prom_diag, yml_offers, yml_diag, tg_raw
+
+    if client is not None:
+        resolved_dhash, prom_raw, prom_diag, yml_offers, yml_diag, tg_raw = await _run(client)
+    else:
+        proxy = get_httpx_proxy(settings)
+        async with httpx.AsyncClient(timeout=15.0, proxy=proxy, follow_redirects=True) as owned:
+            resolved_dhash, prom_raw, prom_diag, yml_offers, yml_diag, tg_raw = await _run(owned)
+
+    verified: list[SupplierOffer] = []
+
+    # 1. Verify Prom.ua real wholesalePrices tiers (with optional visual dHash check)
+    async def _score_prom(it: dict[str, Any], http_client: httpx.AsyncClient) -> Optional[SupplierOffer]:
+        cand_dhash = None
+        if resolved_dhash is not None and it.get("image_url"):
+            cand_dhash = await _fetch_image_dhash(it["image_url"], http_client)
+        verdict = evaluate_product_match(
+            ref_name,
+            it["title"],
+            ref_price_uah=target_price_uah,
+            cand_price_uah=float(it["price"]),
+            candidate_role="wholesale",
+            ref_dhash=resolved_dhash,
+            cand_dhash=cand_dhash,
+        )
+        if not verdict.is_match:
+            return None
+        return SupplierOffer(
+            supplier_name=str(it.get("seller_name") or "Prom Wholesale"),
+            product_title=str(it["title"]),
+            product_url=str(it["product_url"]),
+            wholesale_price_rmb=0.0,
+            wholesale_price_usd=round(float(it["price"]) * uah_rate, 2),
+            wholesale_price_uah=round(float(it["price"]), 2),
+            moq=max(2, int(it.get("moq") or 2)),
+            image_url=it.get("image_url") or None,
+            source="prom_wholesale",
+            supplier_type="ua_wholesale",
+            sales_count_text=str(it.get("tier_note") or "Prom Опт"),
+            match_score=verdict.score,
+            match_label=verdict.label,
+            is_live=True,
+        )
+
+    if prom_raw:
+        if client is not None:
+            prom_scored = await asyncio.gather(*(_score_prom(it, client) for it in prom_raw))
+        else:
+            proxy = get_httpx_proxy(settings)
+            async with httpx.AsyncClient(timeout=10.0, proxy=proxy, follow_redirects=True) as owned:
+                prom_scored = await asyncio.gather(*(_score_prom(it, owned) for it in prom_raw))
+        verified.extend(o for o in prom_scored if o is not None)
+
+    # 2. YML verified offers
+    verified.extend(yml_offers)
+
+    # 3. Verify UA Telegram drop offers via product_matcher
+    matched_tg: list[TelegramDropOffer] = []
+    for tg in tg_raw:
+        verdict = evaluate_product_match(
+            ref_name,
+            tg.title,
+            ref_price_uah=target_price_uah,
+            cand_price_uah=tg.drop_price_uah,
+            candidate_role="wholesale",
+        )
+        if not verdict.is_match:
+            continue
+        matched_tg.append(tg)
+        verified.append(
+            SupplierOffer(
+                supplier_name=f"@{tg.channel} (TG Drop)",
+                product_title=tg.title,
+                product_url=tg.post_url,
+                wholesale_price_rmb=0.0,
+                wholesale_price_usd=tg.drop_price_usd or round(tg.drop_price_uah * uah_rate, 2),
+                wholesale_price_uah=tg.drop_price_uah,
+                moq=1,
+                image_url=tg.image_url or None,
+                source="telegram_drop",
+                supplier_type="ua_wholesale",
+                sales_count_text=f"Drop (RRP {tg.rrc_price_uah:.0f}₴)",
+                match_score=verdict.score,
+                match_label=verdict.label,
+                is_live=True,
+            )
+        )
+
+    verified.sort(key=lambda o: (-o.match_score, o.wholesale_price_uah or 999999.0))
+    verified = verified[:6]
+    status = "verified" if verified else "none"
+    note = (
+        f"{len(verified)} verified UA wholesale match(es)"
+        if verified
+        else "No verified wholesale match yet"
+    )
+    diagnostics = {
+        "prom_wholesale": f"verified: {sum(1 for v in verified if v.source == 'prom_wholesale')} ({prom_diag})",
+        "yml_feeds": yml_diag,
+        "telegram": f"verified: {len(matched_tg)}" if matched_tg else "0 verified TG drops",
+    }
+    return {
+        "offers": verified,
+        "tg_offers": matched_tg[:4],
+        "wholesale_match_status": status,
+        "wholesale_match_note": note,
+        "diagnostics": diagnostics,
+    }

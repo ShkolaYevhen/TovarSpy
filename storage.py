@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS tg_channels (
     enabled INTEGER NOT NULL DEFAULT 1,
     added_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS yml_feeds (
+    url TEXT PRIMARY KEY,
+    label TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_count INTEGER NOT NULL DEFAULT 0,
+    added_at TEXT NOT NULL
+);
 """
 
 
@@ -333,4 +341,70 @@ def delete_tg_channel(db_path: str | Path, handle: str) -> bool:
     norm = normalize_tg_handle(handle)
     with _connect(db_path) as conn:
         cur = conn.execute("DELETE FROM tg_channels WHERE handle = ?", (norm,))
+        return cur.rowcount > 0
+
+
+def list_yml_feeds(db_path: str | Path, enabled_only: bool = False) -> list[dict[str, Any]]:
+    """List configured Ukrainian YML/XML dropship & wholesale feeds."""
+    init_db(db_path)
+    sql = "SELECT * FROM yml_feeds"
+    if enabled_only:
+        sql += " WHERE enabled = 1"
+    sql += " ORDER BY added_at DESC, url ASC"
+    with _connect(db_path) as conn:
+        rows = conn.execute(sql).fetchall()
+    return [
+        {
+            "url": r["url"],
+            "label": r["label"],
+            "enabled": bool(r["enabled"]),
+            "last_count": int(r["last_count"]),
+            "added_at": r["added_at"],
+        }
+        for r in rows
+    ]
+
+
+def upsert_yml_feed(
+    db_path: str | Path,
+    url: str,
+    label: str = "",
+    enabled: bool = True,
+    last_count: Optional[int] = None,
+) -> dict[str, Any]:
+    """Add or update a YML/XML wholesale feed URL."""
+    clean_url = (url or "").strip()
+    if not clean_url.startswith(("http://", "https://")):
+        raise ValueError("YML feed URL must start with http:// or https://")
+    init_db(db_path)
+    clean_label = label.strip() or clean_url.split("/")[2]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _connect(db_path) as conn:
+        existing = conn.execute("SELECT last_count FROM yml_feeds WHERE url = ?", (clean_url,)).fetchone()
+        cnt = int(last_count) if last_count is not None else (int(existing["last_count"]) if existing else 0)
+        conn.execute(
+            """
+            INSERT INTO yml_feeds (url, label, enabled, last_count, added_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(url) DO UPDATE SET
+                label = excluded.label,
+                enabled = excluded.enabled,
+                last_count = excluded.last_count
+            """,
+            (clean_url, clean_label, 1 if enabled else 0, cnt, now_iso),
+        )
+    return {
+        "url": clean_url,
+        "label": clean_label,
+        "enabled": bool(enabled),
+        "last_count": cnt,
+        "added_at": now_iso,
+    }
+
+
+def delete_yml_feed(db_path: str | Path, url: str) -> bool:
+    """Delete a YML/XML wholesale feed by URL."""
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        cur = conn.execute("DELETE FROM yml_feeds WHERE url = ?", ((url or "").strip(),))
         return cur.rowcount > 0

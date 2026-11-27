@@ -21,16 +21,20 @@ from notifier import export_reports, send_telegram_alert
 from sourcing_engine import fetch_google_trends_rss, search_telegram_dropshipping
 from storage import (
     delete_tg_channel,
+    delete_yml_feed,
     get_scan,
     list_scans,
     list_tg_channels,
     list_watchlist,
+    list_yml_feeds,
     remove_watchlist,
     seed_default_channels,
     upsert_tg_channel,
     upsert_watchlist,
+    upsert_yml_feed,
 )
 from tyver_client import fetch_tyver_ai_filters, fetch_tyver_creatives, fetch_tyver_quota
+from yml_feed_manager import fetch_yml_feed_offers
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +168,15 @@ class TgChannelRequest(BaseModel):
     test_scrape: bool = False
 
 
+class YmlFeedRequest(BaseModel):
+    """Request payload for adding a Ukrainian YML/XML dropship catalog feed."""
+
+    url: str
+    label: str = ""
+    enabled: bool = True
+    test_fetch: bool = True
+
+
 class AppState:
     """In-memory report state backed by output_dir CSV/JSON and SQLite storage."""
 
@@ -245,28 +258,44 @@ def _serialize_product(p: AnalyzedProductReport, settings: Optional[Settings] = 
     image_url = p.landing.image_url or p.ad.ad_creative_image_url or (best.image_url if best else "") or ""
     product_url = p.landing.final_url or p.landing.url or p.ad.landing_url
     usd_to_uah = getattr(settings, "USD_TO_UAH", 41.67) if settings else 41.67
+
+    has_verified_ws = p.wholesale_match_status != "none" and best is not None
     ws_uah = (
         (ua_ws_sup.wholesale_price_uah if ua_ws_sup else None)
         or (p.economics.ua_wholesale_price_uah if p.economics else None)
-        or round(p.margin.china_wholesale_price_usd * usd_to_uah, 2)
+        or (round(p.margin.china_wholesale_price_usd * usd_to_uah, 2) if has_verified_ws else None)
     )
     retail_uah = (
         (p.landing.price if p.landing.currency == "UAH" and p.landing.price else None)
         or (p.economics.ua_retail_price_uah if p.economics else None)
-        or round(p.margin.retail_price_usd * usd_to_uah, 2)
+        or (round(p.margin.retail_price_usd * usd_to_uah, 2) if p.margin.retail_price_usd > 0 else None)
     )
+    retail_prices = [s.min_price or s.median_price for s in p.marketplace_signals if s.currency == "UAH" and (s.min_price or s.median_price)]
+    retail_maxes = [s.max_price or s.median_price for s in p.marketplace_signals if s.currency == "UAH" and (s.max_price or s.median_price)]
+
     data.update({
         "image_url": image_url,
         "product_url": product_url,
+        "core_phrase": p.landing.core_phrase,
+        "model_code": p.landing.model_code,
         "supplier_url": ua_ws_sup.product_url if ua_ws_sup else (best.product_url if best else None),
         "ali_url": None if (settings and settings.SKIP_CHINA_SOURCING) else (ali_sup.product_url if ali_sup else None),
         "prom_url": product_url if p.ad.source == "prom_ua" else (prom_sig.top_sample_url if prom_sig else None),
         "prom_wholesale_url": next((s.product_url for s in p.suppliers if s.source == "prom_wholesale"), None),
+        "yml_url": next((s.product_url for s in p.suppliers if s.source == "yml_feed"), None),
         "bigl_url": next((s.product_url for s in p.suppliers if s.source == "bigl_ua"), None),
         "olx_url": product_url if p.ad.source in ("olx_ua", "olx_opt", "olx_pl") else (olx_sig.top_sample_url if olx_sig else None),
-        "wholesale_uah": round(float(ws_uah or 0.0), 2),
-        "retail_uah": round(float(retail_uah or 0.0), 2),
-        "ua_net_profit_uah": p.economics.ua_net_profit_uah if p.economics else round(p.margin.net_margin_usd * usd_to_uah, 2),
+        "wholesale_uah": round(float(ws_uah), 2) if ws_uah is not None else None,
+        "retail_uah": round(float(retail_uah), 2) if retail_uah is not None else None,
+        "retail_min_uah": min(retail_prices) if retail_prices else None,
+        "retail_max_uah": max(retail_maxes) if retail_maxes else None,
+        "ua_net_profit_uah": (p.economics.ua_net_profit_uah if (p.economics and has_verified_ws) else (round(p.margin.net_margin_usd * usd_to_uah, 2) if has_verified_ws else None)),
+        "competitor_advertisers": p.competitor_advertisers,
+        "total_matching_ads": p.total_matching_ads,
+        "cumulative_active_days": p.cumulative_active_days,
+        "competitor_ads": p.competitor_ads,
+        "wholesale_match_status": p.wholesale_match_status or ("verified" if has_verified_ws else "none"),
+        "wholesale_match_note": p.wholesale_match_note or ("Verified UA wholesale" if has_verified_ws else "No verified wholesale match yet"),
         "sold_text": ua_ws_sup.sales_count_text if ua_ws_sup else (best.sales_count_text if best else ""),
         "rating": best.rating if best else None,
         "source": p.ad.source,
@@ -676,6 +705,40 @@ def create_app(
         if not delete_tg_channel(state.settings.DB_PATH, handle):
             raise HTTPException(status_code=404, detail="Telegram channel not found")
         return {"deleted": True, "handle": handle}
+
+    @fastapi_app.get("/api/yml-feeds")
+    async def get_yml_feeds() -> dict[str, Any]:
+        return {"feeds": list_yml_feeds(state.settings.DB_PATH)}
+
+    @fastapi_app.post("/api/yml-feeds")
+    async def add_yml_feed(req: YmlFeedRequest) -> dict[str, Any]:
+        offer_count = None
+        if req.test_fetch:
+            offers = await fetch_yml_feed_offers(req.url, state.settings, label=req.label)
+            offer_count = len(offers)
+        try:
+            saved = upsert_yml_feed(
+                state.settings.DB_PATH,
+                url=req.url,
+                label=req.label,
+                enabled=req.enabled,
+                last_count=offer_count,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"feed": saved, "offer_count": offer_count}
+
+    @fastapi_app.delete("/api/yml-feeds")
+    async def remove_yml_feed_query(url: str = Query(..., min_length=8)) -> dict[str, Any]:
+        if not delete_yml_feed(state.settings.DB_PATH, url):
+            raise HTTPException(status_code=404, detail="YML feed not found")
+        return {"deleted": True, "url": url}
+
+    @fastapi_app.delete("/api/yml-feeds/{feed_id:path}")
+    async def remove_yml_feed_path(feed_id: str) -> dict[str, Any]:
+        if not delete_yml_feed(state.settings.DB_PATH, feed_id):
+            raise HTTPException(status_code=404, detail="YML feed not found")
+        return {"deleted": True, "url": feed_id}
 
     @fastapi_app.get("/api/export/{fmt}")
     async def download_export(fmt: Literal["csv", "json"]) -> FileResponse:

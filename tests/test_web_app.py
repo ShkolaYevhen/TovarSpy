@@ -45,12 +45,14 @@ class TestWebApp(unittest.TestCase):
             "/api/trends",
             "/api/tyver/quota",
             "/api/tyver/search",
+            "/api/yml-feeds",
             "/api/export/csv",
             "/api/alert",
             "/api/simulate",
             "/api/tg-channels",
-            "UA Wholesale",
+            "5-Stage Ad-First",
             "Tyver Ad Spy",
+            "No verified wholesale match yet",
         ):
             self.assertIn(marker, resp_page.text)
 
@@ -63,7 +65,7 @@ class TestWebApp(unittest.TestCase):
         self.assertEqual(cfg_resp.status_code, 200)
         cfg = cfg_resp.json()
         self.assertEqual(cfg["target_countries"], ["UA", "PL", "RO", "CZ", "DE", "US"])
-        self.assertEqual(cfg["min_duration_days"], 7)
+        self.assertEqual(cfg["min_duration_days"], 3)
         self.assertIn("prom_wholesale", cfg["available_sources"])
         self.assertIn("tyver", cfg["available_sources"])
         self.assertTrue(cfg["skip_china_sourcing"])
@@ -120,6 +122,16 @@ class TestWebApp(unittest.TestCase):
         self.assertEqual(add_ch.status_code, 200)
         self.assertEqual(add_ch.json()["channel"]["handle"], "my_drop_ua")
         self.assertEqual(self.client.delete("/spy/api/tg-channels/my_drop_ua").status_code, 200)
+
+        # YML feeds CRUD
+        yml_add = self.client.post(
+            "/spy/api/yml-feeds",
+            json={"url": "https://drop-test.ua/prom.xml", "label": "Odesa XML", "test_fetch": False},
+        )
+        self.assertEqual(yml_add.status_code, 200)
+        self.assertEqual(yml_add.json()["feed"]["label"], "Odesa XML")
+        self.assertEqual(len(self.client.get("/spy/api/yml-feeds").json()["feeds"]), 1)
+        self.assertEqual(self.client.delete("/spy/api/yml-feeds?url=https://drop-test.ua/prom.xml").status_code, 200)
 
         # Exports
         csv_resp = self.client.get("/api/export/csv")

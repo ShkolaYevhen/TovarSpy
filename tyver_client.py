@@ -1,11 +1,37 @@
+from datetime import date, timedelta
 import logging
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
+
+from product_matcher import _token_overlap_score, normalize_product_tokens
 
 logger = logging.getLogger(__name__)
 
 TYVER_BASE_URL = "https://api.tyver.io/public/v1"
+
+_JUNK_STORE_DOMAINS: tuple[str, ...] = (
+    "amazon.",
+    "instagram.com",
+    "facebook.com",
+    "fb.me",
+    "t.me",
+    "youtube.com",
+    "youtu.be",
+    "tiktok.com",
+    "google.",
+    "play.google.com",
+    "apps.apple.com",
+    "wa.me",
+    "viber.com",
+)
+
+_NON_ECOM_KEYWORDS: tuple[str, ...] = (
+    "casino", "казино", "slots", "aviator", "betting", "букмекер", "фриспин", "фріспін",
+    "бонус на депозит", "1win", "pin-up", "pinup", "parimatch", "favbet", "vbet",
+    "cosmolot", "vulkan", "вулкан", "клініка", "стоматолог", "вебінар", "таро", "астролог",
+)
 
 
 def _auth_headers(api_key: str) -> dict[str, str]:
@@ -171,8 +197,10 @@ async def fetch_tyver_creatives(
     ai_angle: Optional[str] = None,
     ai_gambling_game_type: Optional[str] = None,
     activity_days_amount_gte: Optional[int] = None,
-    cta: Optional[str] = None,
-    cms: Optional[str] = None,
+    creation_date_gte: Optional[str] = None,
+    languages: Optional[list[str]] = None,
+    cta: Optional[str | list[str]] = None,
+    cms: Optional[str | list[str]] = None,
     sort: str = "activity_days_amount",
     cursor: Optional[str] = None,
     page: int = 1,
@@ -214,9 +242,22 @@ async def fetch_tyver_creatives(
         params.append(("search", clean_q))
     if activity_days_amount_gte is not None and activity_days_amount_gte >= 0:
         params.append(("activity_days_amount_gte", int(activity_days_amount_gte)))
-    if cta:
+    if creation_date_gte:
+        params.append(("creation_date_gte", creation_date_gte.strip()))
+    for lang in (languages or []):
+        if lang and lang.strip():
+            params.append(("languages", lang.strip().lower()))
+    if isinstance(cta, list):
+        for c_btn in cta:
+            if c_btn and c_btn.strip():
+                params.append(("cta", c_btn.strip()))
+    elif cta:
         params.append(("cta", cta))
-    if cms:
+    if isinstance(cms, list):
+        for cms_val in cms:
+            if cms_val and cms_val.strip():
+                params.append(("cms", cms_val.strip()))
+    elif cms:
         params.append(("cms", cms))
     if cursor:
         params.append(("cursor", cursor))
@@ -263,4 +304,200 @@ async def fetch_tyver_creatives(
         "cursor": next_cursor,
         "items": normalized,
         "error": None,
+    }
+
+
+def _normalize_store_key(url: str) -> str:
+    """Normalize landing URL to domain + clean path for creative deduplication."""
+    parsed = urlparse((url or "").strip())
+    host = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path.rstrip("/")
+    return f"{host}{path}" if host else (url or "").strip().lower()
+
+
+def is_ecom_store_candidate(creative: dict[str, Any]) -> bool:
+    """Return True if a Tyver creative targets a genuine physical-goods web store/landing."""
+    landing = str(creative.get("landing_url") or "").strip()
+    if not landing.startswith(("http://", "https://")):
+        return False
+    parsed = urlparse(landing)
+    host = parsed.netloc.lower()
+    if not host or any(junk in host for junk in _JUNK_STORE_DOMAINS):
+        return False
+
+    verticals = [str(v).upper() for v in (creative.get("verticals") or [])]
+    if "GAMBLING" in verticals or creative.get("ai_category") == "GAMBLING":
+        return False
+
+    blob = " ".join(
+        str(creative.get(k) or "") for k in ("title", "text", "page_name", "target_domain", "landing_url")
+    ).lower()
+    if any(kw in blob for kw in _NON_ECOM_KEYWORDS):
+        return False
+    return True
+
+
+async def discover_winning_ads(
+    api_key: str,
+    *,
+    country: str = "UA",
+    query: str = "",
+    min_days: int = 3,
+    lookback_days: int = 120,
+    languages: Optional[list[str]] = None,
+    ctas: Optional[list[str]] = None,
+    page_size: int = 60,
+    client: Optional[httpx.AsyncClient] = None,
+    proxy: Optional[str] = None,
+) -> dict[str, Any]:
+    """Stage 1: Discover active recent e-commerce/COD ad winners from Tyver.io and deduplicate by landing."""
+    since_date = (date.today() - timedelta(days=max(7, lookback_days))).isoformat()
+    target_country = (country or "UA").strip().upper()
+    clean_q = (query or "").strip()
+    langs = languages if languages is not None else (["uk"] if target_country == "UA" and not clean_q else [])
+    cta_list = ctas if ctas is not None else ["Shop Now", "Order Now", "Buy Now"]
+
+    res = await fetch_tyver_creatives(
+        api_key=api_key,
+        mode="ecom_ua",
+        query=clean_q,
+        countries=[target_country],
+        activity_days_amount_gte=max(1, min_days),
+        creation_date_gte=since_date,
+        languages=langs,
+        cta=cta_list,
+        sort="activity_days_amount",
+        page_size=page_size,
+        client=client,
+        proxy=proxy,
+    )
+    if not res.get("ok"):
+        return res
+
+    raw_items = res.get("items") or []
+    grouped: dict[str, dict[str, Any]] = {}
+    for item in raw_items:
+        if not is_ecom_store_candidate(item):
+            continue
+        key = _normalize_store_key(item["landing_url"])
+        existing = grouped.get(key)
+        if existing is None:
+            copy = dict(item)
+            copy["duplicate_count"] = 1
+            copy["creative_ids"] = [item["id"]] if item.get("id") else []
+            grouped[key] = copy
+        else:
+            existing["duplicate_count"] += 1
+            if item.get("id") and item["id"] not in existing["creative_ids"]:
+                existing["creative_ids"].append(item["id"])
+            if int(item.get("activity_days") or 0) > int(existing.get("activity_days") or 0):
+                existing["activity_days"] = item["activity_days"]
+
+    deduped = list(grouped.values())
+    deduped.sort(
+        key=lambda x: (int(x.get("duplicate_count") or 1), int(x.get("activity_days") or 0)),
+        reverse=True,
+    )
+    return {
+        "ok": True,
+        "mode": "ecom_ua",
+        "total": res.get("total", len(deduped)),
+        "raw_count": len(raw_items),
+        "items": deduped,
+        "error": None,
+    }
+
+
+async def validate_cross_advertiser_demand(
+    api_key: str,
+    core_phrase: str,
+    *,
+    country: str = "UA",
+    min_ad_sets: int = 5,
+    min_days: int = 3,
+    client: Optional[httpx.AsyncClient] = None,
+    proxy: Optional[str] = None,
+) -> dict[str, Any]:
+    """Stage 3: Query Tyver Pass #2 for core_phrase across advertisers to validate cumulative ad spend."""
+    clean_phrase = (core_phrase or "").strip()
+    if len(clean_phrase) < 2 or not (api_key or "").strip():
+        return {
+            "ok": False,
+            "core_phrase": clean_phrase,
+            "competitor_advertisers": 0,
+            "total_matching_ads": 0,
+            "cumulative_active_days": 0,
+            "total_impressions": 0,
+            "meets_ad_sets_threshold": False,
+            "competitor_ads": [],
+        }
+
+    res = await fetch_tyver_creatives(
+        api_key=api_key,
+        mode="ecom_ua",
+        query=clean_phrase,
+        countries=[(country or "UA").strip().upper()],
+        activity_days_amount_gte=max(1, min_days),
+        sort="activity_days_amount",
+        page_size=60,
+        client=client,
+        proxy=proxy,
+    )
+    if not res.get("ok"):
+        return {
+            "ok": False,
+            "core_phrase": clean_phrase,
+            "competitor_advertisers": 0,
+            "total_matching_ads": 0,
+            "cumulative_active_days": 0,
+            "total_impressions": 0,
+            "meets_ad_sets_threshold": False,
+            "competitor_ads": [],
+            "error": res.get("error"),
+        }
+
+    ref_tokens = normalize_product_tokens(clean_phrase)
+    matched: list[dict[str, Any]] = []
+    advertisers: set[str] = set()
+    cum_days = 0
+    total_impr = 0
+
+    for item in res.get("items") or []:
+        if not is_ecom_store_candidate(item):
+            continue
+        blob_tokens = normalize_product_tokens(f"{item.get('title') or ''} {item.get('text') or ''}")
+        recall, _ = _token_overlap_score(ref_tokens, blob_tokens)
+        if ref_tokens and recall < 0.34:
+            continue
+        matched.append(item)
+        adv_key = str(item.get("page_name") or item.get("target_domain") or item.get("id") or "").strip().lower()
+        if adv_key:
+            advertisers.add(adv_key)
+        cum_days += max(0, int(item.get("activity_days") or 0))
+        if isinstance(item.get("impressions"), (int, float)):
+            total_impr += int(item["impressions"])
+
+    total_ads = max(len(matched), int(res.get("total") or len(matched)) if matched else 0)
+    compact_proofs = [
+        {
+            "id": m.get("id"),
+            "page_name": m.get("page_name"),
+            "domain": m.get("target_domain"),
+            "landing_url": m.get("landing_url"),
+            "activity_days": m.get("activity_days"),
+            "image_url": m.get("thumbnail_url") or m.get("image_url"),
+            "cta": m.get("cta"),
+        }
+        for m in matched[:8]
+    ]
+    return {
+        "ok": True,
+        "core_phrase": clean_phrase,
+        "competitor_advertisers": len(advertisers),
+        "total_matching_ads": len(matched),
+        "api_total_hits": total_ads,
+        "cumulative_active_days": cum_days,
+        "total_impressions": total_impr,
+        "meets_ad_sets_threshold": len(matched) >= min_ad_sets,
+        "competitor_ads": compact_proofs,
     }

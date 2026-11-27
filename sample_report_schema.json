@@ -231,6 +231,16 @@
           "default": "Custom PHP",
           "title": "Platform",
           "type": "string"
+        },
+        "core_phrase": {
+          "default": "",
+          "title": "Core Phrase",
+          "type": "string"
+        },
+        "model_code": {
+          "default": "",
+          "title": "Model Code",
+          "type": "string"
         }
       },
       "required": [
@@ -506,6 +516,18 @@
           "title": "Sales Count Text",
           "type": "string"
         },
+        "match_score": {
+          "default": 0.0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Match Score",
+          "type": "number"
+        },
+        "match_label": {
+          "default": "",
+          "title": "Match Label",
+          "type": "string"
+        },
         "is_live": {
           "default": true,
           "title": "Is Live",
@@ -649,6 +671,42 @@
     "category": {
       "default": "",
       "title": "Category",
+      "type": "string"
+    },
+    "competitor_advertisers": {
+      "default": 1,
+      "minimum": 0,
+      "title": "Competitor Advertisers",
+      "type": "integer"
+    },
+    "total_matching_ads": {
+      "default": 1,
+      "minimum": 0,
+      "title": "Total Matching Ads",
+      "type": "integer"
+    },
+    "cumulative_active_days": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Cumulative Active Days",
+      "type": "integer"
+    },
+    "competitor_ads": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Competitor Ads",
+      "type": "array"
+    },
+    "wholesale_match_status": {
+      "default": "",
+      "title": "Wholesale Match Status",
+      "type": "string"
+    },
+    "wholesale_match_note": {
+      "default": "",
+      "title": "Wholesale Match Note",
       "type": "string"
     },
     "analyzed_at": {

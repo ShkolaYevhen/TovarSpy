@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     TARGET_COUNTRIES: list[str] = Field(
         default_factory=lambda: ["UA", "PL", "RO", "CZ", "DE", "US"]
     )
-    MIN_DURATION_DAYS: int = 7
+    MIN_DURATION_DAYS: int = 3
     MIN_ACTIVE_AD_SETS: int = 5
 
     # Margin & profitability constants
@@ -129,6 +129,8 @@ class LandingPageData(BaseModel):
     currency: Optional[str] = None
     image_url: Optional[str] = None
     platform: str = "Custom PHP"
+    core_phrase: str = ""
+    model_code: str = ""
 
 
 class SupplierOffer(BaseModel):
@@ -147,6 +149,8 @@ class SupplierOffer(BaseModel):
     source: str = "ua_wholesale"
     supplier_type: str = ""
     sales_count_text: str = ""
+    match_score: float = Field(default=0.0, ge=0, le=100)
+    match_label: str = ""
     is_live: bool = True
 
 
@@ -243,6 +247,12 @@ class AnalyzedProductReport(BaseModel):
     economics: Optional[CoFounderEconomics] = None
     source_diagnostics: dict[str, str] = Field(default_factory=dict)
     category: str = ""
+    competitor_advertisers: int = Field(default=1, ge=0)
+    total_matching_ads: int = Field(default=1, ge=0)
+    cumulative_active_days: int = Field(default=0, ge=0)
+    competitor_ads: list[dict[str, Any]] = Field(default_factory=list)
+    wholesale_match_status: str = ""
+    wholesale_match_note: str = ""
     analyzed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
