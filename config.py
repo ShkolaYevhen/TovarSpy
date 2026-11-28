@@ -14,6 +14,41 @@ DEFAULT_FX_RATES_TO_USD: dict[str, float] = {
 }
 
 
+# Ad discovery & COD filtering thresholds
+COD_DISCOVERY_SIGNALS: tuple[str, ...] = (
+    "Нова Пошта",
+    "Оплата при отриманні",
+    "замовити зі знижкою",
+)
+DROPSHIP_DOMAIN_TLDS: tuple[str, ...] = (
+    ".store",
+    ".shop",
+    ".space",
+    ".online",
+    ".site",
+    ".com.ua",
+)
+DROPSHIP_CTAS: tuple[str, ...] = ("Shop Now", "Order Now", "Buy Now")
+MARKETPLACE_BLOCKLIST: tuple[str, ...] = (
+    "rozetka.com.ua",
+    "comfy.ua",
+    "epicentrk.ua",
+    "prom.ua",
+    "olx.ua",
+    "allo.ua",
+    "foxtrot.com.ua",
+    "eva.ua",
+    "makeup.com.ua",
+    "shafa.ua",
+    "kasta.ua",
+)
+MIN_DURATION_DAYS: int = 3
+MAX_AD_AGE_DAYS: int = 14
+MIN_ACTIVE_AD_SETS: int = 5
+MIN_EST_SPEND_USD: float = 100.0
+EST_DAILY_SPEND_PER_CREATIVE_USD: float = 8.0
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or .env file."""
 
@@ -38,8 +73,11 @@ class Settings(BaseSettings):
     TARGET_COUNTRIES: list[str] = Field(
         default_factory=lambda: ["UA", "PL", "RO", "CZ", "DE", "US"]
     )
-    MIN_DURATION_DAYS: int = 3
-    MIN_ACTIVE_AD_SETS: int = 5
+    MIN_DURATION_DAYS: int = MIN_DURATION_DAYS
+    MAX_AD_AGE_DAYS: int = MAX_AD_AGE_DAYS
+    MIN_ACTIVE_AD_SETS: int = MIN_ACTIVE_AD_SETS
+    MIN_EST_SPEND_USD: float = MIN_EST_SPEND_USD
+    EST_DAILY_SPEND_PER_CREATIVE_USD: float = EST_DAILY_SPEND_PER_CREATIVE_USD
 
     # Margin & profitability constants
     SHIPPING_COST_EST_USD: float = 2.50
@@ -114,6 +152,7 @@ class AdRecord(BaseModel):
     days_running: int = Field(ge=0)
     ad_creative_image_url: Optional[str] = None
     active_ad_sets: int = Field(default=1, ge=1)
+    est_spend_usd: float = Field(default=0.0, ge=0)
     countries: list[str] = Field(default_factory=list)
     source: str = "meta"
     is_live: bool = True
@@ -128,9 +167,14 @@ class LandingPageData(BaseModel):
     price: Optional[float] = Field(default=None, ge=0)
     currency: Optional[str] = None
     image_url: Optional[str] = None
+    fallback_image_url: Optional[str] = None
     platform: str = "Custom PHP"
     core_phrase: str = ""
     model_code: str = ""
+    is_cod_lander: bool = False
+    cod_score: int = Field(default=0, ge=0, le=100)
+    cod_signals: list[str] = Field(default_factory=list)
+    is_generic_catalog: bool = False
 
 
 class SupplierOffer(BaseModel):
@@ -250,6 +294,8 @@ class AnalyzedProductReport(BaseModel):
     competitor_advertisers: int = Field(default=1, ge=0)
     total_matching_ads: int = Field(default=1, ge=0)
     cumulative_active_days: int = Field(default=0, ge=0)
+    est_spend_usd: float = Field(default=0.0, ge=0)
+    spend_basis: str = ""
     competitor_ads: list[dict[str, Any]] = Field(default_factory=list)
     wholesale_match_status: str = ""
     wholesale_match_note: str = ""

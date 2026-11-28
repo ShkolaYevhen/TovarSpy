@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 from landing_parser import (
+    detect_cod_lander_dna,
     detect_platform,
     fetch_landing_page,
     fetch_landing_page_fast,
@@ -169,6 +170,84 @@ class TestLandingParser(unittest.IsolatedAsyncioTestCase):
             fast = await fetch_landing_page_fast("https://shop.ua/lenovo", client=client)
         self.assertAlmostEqual(fast.price or 0.0, 1290.0)
         self.assertEqual(fast.model_code, "l-fan003")
+
+    def test_cod_lander_dna_reference_archetypes_and_pixel_microprice_fixes(self) -> None:
+        # Archetype 1: massgun.domely.com.ua (FB pixel first <img>, title with "| 268 грн", COD form + Nova Poshta)
+        massgun_html = """
+        <html>
+          <head>
+            <title>Перкусійний масажер для всього тіла | 268 грн</title>
+            <meta property="og:title" content="Перкусійний масажер для всього тіла | 268 грн" />
+          </head>
+          <body>
+            <img src="https://www.facebook.com/tr?id=1586287526339410&ev=PageView&noscript=1" />
+            <del>1199 грн</del><span class="promo-price">699 грн</span>
+            <p>Доставка Нова Пошта, оплата при отриманні</p>
+            <form><input name="name" /><input name="phone" type="tel" /></form>
+          </body>
+        </html>
+        """
+        p1 = parse_landing_html(
+            massgun_html,
+            "https://massgun.domely.com.ua/",
+            fallback_image_url="https://cdn.tyver.example/massgun.jpg",
+        )
+        self.assertTrue(p1.is_cod_lander)
+        self.assertGreaterEqual(p1.cod_score, 80)
+        self.assertEqual(p1.title, "Перкусійний масажер для всього тіла")
+        self.assertAlmostEqual(p1.price or 0.0, 699.0)
+        self.assertEqual(p1.image_url, "https://cdn.tyver.example/massgun.jpg")
+
+        # Archetype 2: testishop.shop/p/0179 (no og:title, H1 real product, micro-price 9 UAH / 60 UAH delivery skipped)
+        testishop_html = """
+        <html>
+          <head><title>Каталог</title></head>
+          <body>
+            <h1>Роликовий масажер Massager Neck для шиї з підігрівом</h1>
+            <img src="https://cdn.example.com/pixel.png" width="1" height="1" />
+            <img src="/api/quick-tests/images/0179" />
+            <span class="badge">9₴</span>
+            <span>Доставка 60 грн</span>
+            <del>1490 грн</del>
+            <div class="price-new">899 грн</div>
+            <p>Оплата при отриманні, відправка сьогодні</p>
+            <form><input name="name" placeholder="Ім'я"/><input name="phone" /></form>
+          </body>
+        </html>
+        """
+        p2 = parse_landing_html(testishop_html, "https://testishop.shop/p/0179")
+        self.assertTrue(p2.is_cod_lander)
+        self.assertFalse(p2.is_generic_catalog)
+        self.assertEqual(p2.title, "Роликовий масажер Massager Neck для шиї з підігрівом")
+        self.assertAlmostEqual(p2.price or 0.0, 899.0)
+        self.assertEqual(p2.image_url, "https://testishop.shop/api/quick-tests/images/0179")
+
+        # Archetype 3: legs.zario.space (subdomain .space + _csrf + name/phone COD form)
+        zario_html = """
+        <html>
+          <head><title>Массажний електричний коврик EMS Foot Mat</title></head>
+          <body>
+            <form><input type="hidden" name="_csrf" /><input name="name" /><input name="phone" /></form>
+            <div class="price">499 грн</div>
+            <img src="/assets/ems-mat.webp" />
+          </body>
+        </html>
+        """
+        p3 = parse_landing_html(zario_html, "https://legs.zario.space/")
+        self.assertTrue(p3.is_cod_lander)
+        self.assertIn("cod_order_form", p3.cod_signals)
+        self.assertIn("dropship_url_dna", p3.cod_signals)
+
+    def test_generic_catalog_titles_rejected(self) -> None:
+        for header in ("Бестселери", "Каталог", "Акційні товари"):
+            html = f"<html><head><title>{header}</title></head><body><h1>{header}</h1><span class='price'>9₴</span></body></html>"
+            parsed = parse_landing_html(html, "https://pirnay.ua/collections/all")
+            self.assertTrue(parsed.is_generic_catalog, f"{header} must be flagged as generic catalog")
+            self.assertFalse(parsed.is_cod_lander)
+            self.assertIsNone(parsed.price)
+            self.assertEqual(parsed.core_phrase, "")
+            dna = detect_cod_lander_dna(html, "https://pirnay.ua/collections/all")
+            self.assertTrue(dna["is_generic_catalog"])
 
 
 if __name__ == "__main__":

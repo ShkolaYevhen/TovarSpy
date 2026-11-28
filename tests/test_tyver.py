@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 import json
 import tempfile
 import unittest
@@ -9,11 +10,13 @@ import httpx
 from fastapi.testclient import TestClient
 
 from ad_collector import collect_winning_ads
-from config import Settings
+from config import COD_DISCOVERY_SIGNALS, Settings
 from tyver_client import (
     discover_winning_ads,
+    estimate_ad_spend_usd,
     fetch_tyver_creatives,
     fetch_tyver_quota,
+    is_ecom_store_candidate,
     validate_cross_advertiser_demand,
 )
 from web_app import create_app
@@ -296,6 +299,154 @@ class TestTyverClient(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(val["meets_ad_sets_threshold"])
         self.assertEqual(val["cumulative_active_days"], sum(5 + i for i in range(6)))
         self.assertEqual(val["total_impressions"], 6000)
+        self.assertTrue(val["meets_spend_threshold"])
+        self.assertGreaterEqual(val["est_spend_usd"], 100.0)
+
+    async def test_age_window_marketplace_filter_multisignal_and_spend(self) -> None:
+        seen_searches: list[str] = []
+        recent_6d = (date.today() - timedelta(days=6)).isoformat()
+        recent_8d = (date.today() - timedelta(days=8)).isoformat()
+        raw_items = [
+            {
+                "provider_id": "cod-1",
+                "activity_days_amount": 6,
+                "creation_time": f"{recent_6d}T10:00:00Z",
+                "bodies": ["Масажер перкусійний Нова Пошта"],
+                "link_titles": ["Massager Pro"],
+                "countries": ["UA"],
+                "provider_page_name": "COD Shop",
+                "target_url": "https://massgun.domely.com.ua/",
+                "domain": "massgun.domely.com.ua",
+                "cta": "Shop Now",
+                "media": [{"content_type": "video/mp4", "url": "https://v.test/1.mp4", "compressed_video_image_preview_url": "https://cdn.b2.test/thumb.jpg"}],
+            },
+            {
+                "provider_id": "cod-2",
+                "activity_days_amount": 8,
+                "creation_time": f"{recent_8d}T10:00:00Z",
+                "bodies": ["Масажер перкусійний Оплата при отриманні"],
+                "link_titles": ["Massager Pro"],
+                "countries": ["UA"],
+                "provider_page_name": "COD Shop",
+                "target_url": "https://massgun.domely.com.ua/?utm_source=fb",
+                "domain": "massgun.domely.com.ua",
+                "cta": "Order Now",
+            },
+            {
+                "provider_id": "too-old",
+                "activity_days_amount": 32,
+                "bodies": ["Старий товар"],
+                "countries": ["UA"],
+                "provider_page_name": "Old Shop",
+                "target_url": "https://old.shop/item",
+            },
+            {
+                "provider_id": "marketplace-comfy",
+                "activity_days_amount": 7,
+                "bodies": ["Comfy sale"],
+                "countries": ["UA"],
+                "provider_page_name": "Comfy",
+                "target_url": "https://comfy.ua/massager",
+            },
+            {
+                "provider_id": "catalog-url",
+                "activity_days_amount": 7,
+                "bodies": ["Catalog"],
+                "countries": ["UA"],
+                "provider_page_name": "BigStore",
+                "target_url": "https://pirnay.ua/collections/all",
+            },
+        ]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            qs = parse_qs(urlparse(str(request.url)).query)
+            self.assertEqual(qs.get("activity_days_amount_gte"), ["3"])
+            self.assertEqual(qs.get("activity_days_amount_lte"), ["14"])
+            self.assertIn("creation_date_gte", qs)
+            seen_searches.append((qs.get("search") or [""])[0])
+            return httpx.Response(200, json={"detail": "Success", "data": {"items": raw_items, "total": 5}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            res = await discover_winning_ads(
+                "tyv_abc",
+                country="UA",
+                query="",
+                min_days=3,
+                max_age_days=14,
+                client=client,
+            )
+
+        self.assertTrue(res["ok"])
+        for signal in COD_DISCOVERY_SIGNALS:
+            self.assertIn(signal, seen_searches)
+        # Only massgun.domely.com.ua survives (old=32d, comfy.ua, and /collections filtered out)
+        self.assertEqual(len(res["items"]), 1)
+        item = res["items"][0]
+        self.assertEqual(item["duplicate_count"], 2)
+        self.assertEqual(item["cumulative_days"], 14)
+        self.assertAlmostEqual(item["est_spend_usd"], 112.0)
+        self.assertEqual(item["thumbnail_url"], "https://cdn.b2.test/thumb.jpg")
+        self.assertFalse(is_ecom_store_candidate({"landing_url": "https://rozetka.com.ua/p123"}))
+        spend_days, basis = estimate_ad_spend_usd(15, 0)
+        self.assertEqual(spend_days, 120.0)
+        self.assertEqual(basis, "cumulative_days")
+
+    async def test_stage3_enforces_two_tokens_sixty_pct_overlap_and_spend_gate(self) -> None:
+        # <2 core tokens should fail immediately without hitting API
+        short_res = await validate_cross_advertiser_demand("tyv_abc", "Каталог", min_ad_sets=5)
+        self.assertFalse(short_res["ok"])
+        self.assertFalse(short_res["meets_spend_threshold"])
+
+        one_tok = await validate_cross_advertiser_demand("tyv_abc", "масажер", min_ad_sets=5)
+        self.assertFalse(one_tok["ok"])
+
+        ads = [
+            # 5 exact ads (>= 60% overlap) with 3 days each -> 15 cum days * $8 = $120 >= $100
+            *[
+                {
+                    "provider_id": f"match-{i}",
+                    "activity_days_amount": 3,
+                    "bodies": ["Перкусійний масажер пістолет для тіла"],
+                    "link_titles": ["Перкусійний масажер пістолет"],
+                    "countries": ["UA"],
+                    "provider_page_name": f"Shop{i}",
+                    "target_url": f"https://shop{i}.space/",
+                    "impressions": 0,
+                }
+                for i in range(5)
+            ],
+            # Only 1/3 token overlap (< 60%) -> must be excluded from counts & spend!
+            {
+                "provider_id": "partial-low-overlap",
+                "activity_days_amount": 10,
+                "bodies": ["Масажер роликовий для обличчя"],
+                "link_titles": ["Роликовий масажер для обличчя"],
+                "countries": ["UA"],
+                "provider_page_name": "FaceShop",
+                "target_url": "https://faceshop.shop/",
+            },
+        ]
+
+        def handler(_req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"detail": "Success", "data": {"items": ads, "total": 6}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            res = await validate_cross_advertiser_demand(
+                "tyv_abc",
+                "перкусійний масажер пістолет",
+                country="UA",
+                min_ad_sets=5,
+                min_days=3,
+                max_age_days=14,
+                min_spend_usd=100.0,
+                client=client,
+            )
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["total_matching_ads"], 5)
+        self.assertEqual(res["cumulative_active_days"], 15)
+        self.assertAlmostEqual(res["est_spend_usd"], 120.0)
+        self.assertTrue(res["meets_spend_threshold"])
 
 
 class TestTyverWebEndpoints(unittest.TestCase):

@@ -34,7 +34,13 @@ from marketplace_intel import (
     fetch_ua_wholesale_offers,
 )
 from notifier import export_reports, send_telegram_alert
-from product_matcher import evaluate_product_match, extract_core_phrase
+from product_matcher import (
+    _token_overlap_score,
+    evaluate_product_match,
+    extract_core_phrase,
+    is_valid_core_phrase,
+    normalize_product_tokens,
+)
 from sourcing_engine import (
     fetch_aliexpress_live,
     fetch_google_trends_rss,
@@ -252,28 +258,37 @@ async def run_ad_first_arbitrage(
     clean_q = (query or "").strip()
     uah_rate = active_settings.FX_RATES_TO_USD.get("UAH", 0.024)
     min_days = max(1, int(active_settings.MIN_DURATION_DAYS))
+    max_age_days = max(min_days, int(active_settings.MAX_AD_AGE_DAYS))
     min_ad_sets = max(1, int(active_settings.MIN_ACTIVE_AD_SETS))
+    min_spend_usd = max(0.0, float(active_settings.MIN_EST_SPEND_USD))
+
+    def _is_same_product_cluster(phrase_a: str, phrase_b: str) -> bool:
+        toks_a = normalize_product_tokens(phrase_a)
+        toks_b = normalize_product_tokens(phrase_b)
+        if len(toks_a) < 2 or len(toks_b) < 2:
+            return False
+        recall, prec = _token_overlap_score(toks_a, toks_b)
+        return min(recall, prec) >= 0.60
 
     async def _execute(http_client: httpx.AsyncClient) -> tuple[list[dict[str, str]], dict[str, Any], list[dict[str, Any]]]:
-        trends_task = fetch_google_trends_rss(geo=geo_trends or target_country, settings=active_settings, client=http_client)
         stage1_res = await discover_winning_ads(
             active_settings.TYVER_API_KEY or "",
             country=target_country,
             query=clean_q,
             min_days=min_days,
-            lookback_days=120,
+            max_age_days=max_age_days,
             page_size=50,
             client=http_client,
         )
         raw_stage1 = stage1_res.get("items") or []
         if not raw_stage1 and clean_q:
-            # Retry without language restriction when keyword yielded 0 UK-tagged results
+            # Retry without language restriction when keyword yielded 0 UK-tagged results (preserving 3-14d window)
             stage1_res = await discover_winning_ads(
                 active_settings.TYVER_API_KEY or "",
                 country=target_country,
                 query=clean_q,
                 min_days=min_days,
-                lookback_days=180,
+                max_age_days=max_age_days,
                 languages=[],
                 page_size=50,
                 client=http_client,
@@ -282,34 +297,48 @@ async def run_ad_first_arbitrage(
 
         candidates = raw_stage1[:12]
 
-        # Stage 2: Extract landing title, core_phrase, UAH price, hero image
+        # Stage 2: Extract landing title, core_phrase, UAH price, COD DNA, and pixel-free hero image
         landings = await asyncio.gather(
-            *(fetch_landing_page_fast(ad["landing_url"], client=http_client) for ad in candidates),
+            *(
+                fetch_landing_page_fast(
+                    ad["landing_url"],
+                    client=http_client,
+                    fallback_image_url=ad.get("thumbnail_url") or ad.get("image_url"),
+                )
+                for ad in candidates
+            ),
             return_exceptions=True,
         )
 
         staged_candidates: list[dict[str, Any]] = []
-        seen_phrases: set[str] = set()
+        seen_phrases: list[str] = []
         for ad, lres in zip(candidates, landings):
+            fallback_img = ad.get("thumbnail_url") or ad.get("image_url")
             if isinstance(lres, Exception):
-                landing = LandingPageData(url=ad["landing_url"], final_url=ad["landing_url"])
+                landing = LandingPageData(
+                    url=ad["landing_url"],
+                    final_url=ad["landing_url"],
+                    fallback_image_url=fallback_img,
+                )
             else:
                 landing = lres
+                if not landing.fallback_image_url and fallback_img:
+                    landing.fallback_image_url = fallback_img
             if not landing.title:
                 landing.title = ad.get("title") or ad.get("page_name") or ""
             if not landing.core_phrase:
                 landing.core_phrase = extract_core_phrase(landing.title or ad.get("text") or "", max_words=4)
-            if not landing.image_url:
-                landing.image_url = ad.get("thumbnail_url") or ad.get("image_url")
-            if not landing.core_phrase or len(landing.core_phrase) < 3:
+            if not landing.image_url and fallback_img:
+                landing.image_url = fallback_img
+            if landing.is_generic_catalog or not is_valid_core_phrase(landing.core_phrase, min_tokens=2):
                 continue
             pkey = _normalize_title_key(landing.core_phrase)
-            if pkey in seen_phrases:
+            if any(pkey == _normalize_title_key(sp) or _is_same_product_cluster(landing.core_phrase, sp) for sp in seen_phrases):
                 continue
-            seen_phrases.add(pkey)
+            seen_phrases.append(landing.core_phrase)
             staged_candidates.append({"ad": ad, "landing": landing})
 
-        # Stage 3: Tyver Pass #2 Cross-Advertiser validation on extracted core_phrase
+        # Stage 3: Tyver Pass #2 Cross-Advertiser validation on extracted core_phrase (3-14d, >=5 ads, >=$100 spend)
         stage3_results = await asyncio.gather(
             *(
                 validate_cross_advertiser_demand(
@@ -318,6 +347,8 @@ async def run_ad_first_arbitrage(
                     country=target_country,
                     min_ad_sets=min_ad_sets,
                     min_days=min_days,
+                    max_age_days=max_age_days,
+                    min_spend_usd=min_spend_usd,
                     client=http_client,
                 )
                 for item in staged_candidates[:8]
@@ -328,13 +359,16 @@ async def run_ad_first_arbitrage(
         for item, s3 in zip(staged_candidates[:8], stage3_results):
             ad = item["ad"]
             total_matching = max(int(ad.get("duplicate_count") or 1), int(s3.get("total_matching_ads") or 0))
-            if total_matching < min_ad_sets:
+            est_spend = max(float(ad.get("est_spend_usd") or 0.0), float(s3.get("est_spend_usd") or 0.0))
+            if total_matching < min_ad_sets or est_spend < min_spend_usd:
                 continue
             item["stage3"] = {
                 **s3,
                 "total_matching_ads": total_matching,
+                "est_spend_usd": round(est_spend, 2),
+                "spend_basis": s3.get("spend_basis") or ad.get("spend_basis") or "cumulative_days",
                 "competitor_advertisers": max(1, int(s3.get("competitor_advertisers") or 1)),
-                "cumulative_active_days": max(int(ad.get("activity_days") or 0), int(s3.get("cumulative_active_days") or 0)),
+                "cumulative_active_days": max(int(ad.get("cumulative_days") or ad.get("activity_days") or 0), int(s3.get("cumulative_active_days") or 0)),
             }
             validated.append(item)
 
@@ -363,8 +397,7 @@ async def run_ad_first_arbitrage(
             return {**entry, "retail_uah": retail_uah, "retail_res": retail_res, "ws_res": ws_res}
 
         enriched = await asyncio.gather(*(_enrich_stage5(v) for v in validated))
-        trends = await trends_task
-        return trends, {"stage1_raw": len(raw_stage1), "stage2_landings": len(staged_candidates), "stage3_passed": len(validated)}, list(enriched)
+        return [], {"stage1_raw": len(raw_stage1), "stage2_landings": len(staged_candidates), "stage3_passed": len(validated)}, list(enriched)
 
     if client is not None:
         trends, counts, enriched = await _execute(client)
@@ -457,8 +490,9 @@ async def run_ad_first_arbitrage(
                     page_name=str(ad.get("page_name") or "Tyver Advertiser"),
                     landing_url=landing.final_url or landing.url,
                     days_running=max(0, int(ad.get("activity_days") or 0)),
-                    ad_creative_image_url=landing.image_url or ad.get("thumbnail_url"),
+                    ad_creative_image_url=landing.image_url or landing.fallback_image_url or ad.get("thumbnail_url"),
                     active_ad_sets=max(1, int(s3["total_matching_ads"])),
+                    est_spend_usd=float(s3.get("est_spend_usd") or 0.0),
                     countries=ad.get("countries") or [target_country],
                     source="tyver",
                     is_live=True,
@@ -475,6 +509,8 @@ async def run_ad_first_arbitrage(
                 competitor_advertisers=int(s3["competitor_advertisers"]),
                 total_matching_ads=int(s3["total_matching_ads"]),
                 cumulative_active_days=int(s3["cumulative_active_days"]),
+                est_spend_usd=float(s3.get("est_spend_usd") or 0.0),
+                spend_basis=str(s3.get("spend_basis") or ""),
                 competitor_ads=s3.get("competitor_ads") or [],
                 wholesale_match_status=ws_status,
                 wholesale_match_note=ws_note,
@@ -484,6 +520,8 @@ async def run_ad_first_arbitrage(
     reports.sort(
         key=lambda r: (
             1 if r.wholesale_match_status == "verified" else 0,
+            1 if r.landing.is_cod_lander else 0,
+            r.est_spend_usd,
             r.total_matching_ads,
             r.economics.opportunity_score if r.economics else 0.0,
         ),
@@ -492,13 +530,13 @@ async def run_ad_first_arbitrage(
     exported = export_reports(reports, output_dir=output_dir)
 
     source_diagnostics = {
-        "stage1_tyver_ads": f"live: {counts['stage1_raw']} UA ads ({min_days}+ days)",
+        "stage1_tyver_ads": f"live: {counts['stage1_raw']} UA ads ({min_days}-{max_age_days}d)",
         "stage2_landings": f"parsed: {counts['stage2_landings']} pages",
-        "stage3_competitors": f"passed: {counts['stage3_passed']} with {min_ad_sets}+ ads",
+        "stage3_competitors": f"passed: {counts['stage3_passed']} ({min_ad_sets}+ ads, ${int(min_spend_usd)}+ spend)",
         "stage5_retail": f"matched: {retail_matched_cnt} (Hotline/Prom/OLX)",
         "stage5_wholesale": f"verified: {wholesale_verified_cnt} real wholesale",
         "china_1688": "skipped (UA-only mode)",
-        "google_trends": f"live: {len(trends)} topics ({(geo_trends or target_country).upper()})" if trends else "empty",
+        "google_trends": "suppressed (noisy news disabled in 5-stage COD mode)",
     }
 
     try:

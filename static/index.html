@@ -135,7 +135,7 @@
     .toggle-wrap input { accent-color: var(--accent); }
 
     .thresholds-grid {
-      display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px;
       padding-top: 12px; border-top: 1px solid var(--border);
     }
     .field { display: flex; flex-direction: column; gap: 4px; }
@@ -372,19 +372,20 @@
       <!-- Super-Parser Controls -->
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">5-Stage Ad-First Arbitrage (Tyver 3+ Days / 5+ Ads → Landing → Exact Retail &amp; Real UA Wholesale)</div>
+          <div class="panel-title">5-Stage Ad-First Arbitrage (Tyver 3–14d / 5+ Ads / $100+ Spend → COD Lander → Exact Retail &amp; Real UA Wholesale)</div>
           <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
             <label class="toggle-wrap">
               <input type="checkbox" id="toggleMock" />
               <span>Offline Demo Mode</span>
             </label>
-            <button class="btn btn-sm" type="button" id="toggleThresholdsBtn">Thresholds (3d / 5+) ▾</button>
+            <button class="btn btn-sm" type="button" id="toggleTrendsBtn">📈 Показати Google Trends (опційно)</button>
+            <button class="btn btn-sm" type="button" id="toggleThresholdsBtn">Thresholds (3–14d / 5+ / $100+) ▾</button>
             <button class="btn btn-sm" type="button" id="toggleBlocksBtn">Source Notes ▾</button>
           </div>
         </div>
 
         <div class="runner-row">
-          <input class="input" id="scanQuery" type="text" placeholder="Optional niche keyword (leave blank for top scaled UA Ad-First products)..." />
+          <input class="input" id="scanQuery" type="text" placeholder="Optional niche keyword (leave blank for auto-discovered 3–14d UA COD products)..." />
           <input class="input mono" id="scanProxy" type="text" placeholder="Optional proxy (http://user:pass@ip:port)" />
           <button class="btn btn-primary" id="runScanBtn" type="button">Search Keyword</button>
           <button class="btn btn-emerald" id="superParseBtn" type="button">⚡ Run 5-Stage Ad-First Spy</button>
@@ -392,7 +393,7 @@
 
         <div class="chips-group" id="categoryChips"><span class="group-label">Categories:</span></div>
 
-        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">
+        <div id="trendsRow" style="display:none;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">
           <div class="chips-group" id="trendsChips" style="flex:1;">
             <span class="group-label">Google Trends:</span>
           </div>
@@ -407,7 +408,9 @@
 
         <div class="thresholds-grid" id="thresholdsPanel" style="display:none;">
           <div class="field"><label for="thMinDays">Min Active Days (3+)</label><input class="input" id="thMinDays" type="number" min="1" step="1" value="3" /></div>
+          <div class="field"><label for="thMaxAge">Max Age Days (≤14)</label><input class="input" id="thMaxAge" type="number" min="3" step="1" value="14" /></div>
           <div class="field"><label for="thMinSets">Min Ad Duplicates (5+)</label><input class="input" id="thMinSets" type="number" min="1" step="1" value="5" /></div>
+          <div class="field"><label for="thMinSpend">Min Est Spend ($100+)</label><input class="input" id="thMinSpend" type="number" min="0" step="10" value="100" /></div>
           <div class="field"><label for="thShipping">Shipping Est ($)</label><input class="input" id="thShipping" type="number" min="0" step="0.1" /></div>
           <div class="field"><label for="thCpa">Cross-Border CPA ($)</label><input class="input" id="thCpa" type="number" min="0" step="0.5" /></div>
           <div class="field"><label for="thWinnerMin">Winner Net Margin ($)</label><input class="input" id="thWinnerMin" type="number" step="0.5" /></div>
@@ -704,6 +707,19 @@
       if (/^https?:\/\//i.test(raw)) return apiUrl(`/api/img?url=${encodeURIComponent(raw)}`);
       return FALLBACK_SVG;
     }
+    function handleImgFallback(imgEl, rawFallback) {
+      if (rawFallback && !imgEl.dataset.triedFallback) {
+        imgEl.dataset.triedFallback = '1';
+        const fb = imgSrc(rawFallback);
+        if (fb !== FALLBACK_SVG) {
+          imgEl.src = fb;
+          return;
+        }
+      }
+      imgEl.onerror = null;
+      imgEl.src = FALLBACK_SVG;
+    }
+    window.handleImgFallback = handleImgFallback;
 
     const state = {
       config: null,
@@ -832,7 +848,9 @@
       $('modeText').textContent = m.mock ? 'Offline Demo' : 'UA Wholesale Live';
       $('updatedAt').textContent = m.updated_at ? `Updated: ${new Date(m.updated_at).toLocaleTimeString()}` : 'Updated: —';
       renderDiagnostics();
-      if (rep.trending_keywords && rep.trending_keywords.length) renderTrends(rep.trending_keywords);
+      if ($('trendsRow').style.display !== 'none' && rep.trending_keywords && rep.trending_keywords.length) {
+        renderTrends(rep.trending_keywords);
+      }
     }
 
     function getFilteredProducts() {
@@ -881,34 +899,43 @@
         const uaProfUah = hasWs ? Number(item.ua_net_profit_uah ?? e.ua_net_profit_uah ?? 0) : null;
         const wsUah = hasWs ? Number(item.wholesale_uah) : null;
         const retUah = item.retail_uah != null ? Number(item.retail_uah) : (m.retail_price_usd > 0 ? Number(m.retail_price_usd * 41.67) : null);
-        const pic = imgSrc(item.image_url || l.image_url || ad.ad_creative_image_url);
+        const rawPrimary = item.image_url || l.image_url || ad.ad_creative_image_url;
+        const rawFallback = item.fallback_image_url || l.fallback_image_url || ad.ad_creative_image_url || '';
+        const pic = imgSrc(rawPrimary || rawFallback);
+        const fbArg = (rawFallback && rawFallback !== rawPrimary) ? rawFallback : '';
         const prodUrl = item.product_url || l.final_url || l.url;
         const supUrl = item.supplier_url || item.prom_wholesale_url || item.yml_url || item.bigl_url;
         const compAds = Number(item.total_matching_ads || ad.active_ad_sets || 1);
         const compStores = Number(item.competitor_advertisers || 1);
         const cumDays = Number(item.cumulative_active_days || ad.days_running || 0);
+        const estSpend = Number(item.est_spend_usd ?? ad.est_spend_usd ?? 0);
+        const isCod = Boolean(item.is_cod_lander ?? l.is_cod_lander);
+        const codScore = Number(item.cod_score ?? l.cod_score ?? 0);
+        const codSignals = (item.cod_signals || l.cod_signals || []).join(', ');
         const matchTop = (item.suppliers && item.suppliers[0]?.match_score) ? `${Number(item.suppliers[0].match_score).toFixed(0)}% match` : '';
 
         return `
           <article class="product-card" data-ad-id="${esc(ad.ad_id)}">
             <div class="card-media" onclick="openDrawer('${esc(ad.ad_id)}')">
-              <img src="${esc(pic)}" alt="${esc(l.title)}" loading="lazy" onerror="this.onerror=null;this.src='${FALLBACK_SVG}'" />
+              <img src="${esc(pic)}" alt="${esc(l.title)}" loading="lazy" onerror="handleImgFallback(this,'${esc(fbArg)}')" />
               <div class="media-top-left">
-                <span class="badge badge-win">${ad.days_running}d active</span>
+                <span class="badge badge-win">${ad.days_running}d (3–14d)</span>
                 <span class="badge badge-src">${compAds} ads · ${compStores} stores</span>
+                ${estSpend > 0 ? `<span class="badge badge-win">~$${estSpend.toFixed(0)}</span>` : ''}
               </div>
               <div class="media-top-right">
                 <span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span>
               </div>
               <div class="media-bottom-left">
                 ${l.core_phrase ? `<span class="badge">${esc(l.core_phrase)}</span>` : ''}
+                ${isCod ? `<span class="badge badge-win" title="COD Score ${codScore}: ${esc(codSignals)}">COD Lander</span>` : ''}
                 ${matchTop ? `<span class="badge badge-win">${esc(matchTop)}</span>` : ''}
               </div>
             </div>
             <div class="card-body">
               <div class="card-title" onclick="openDrawer('${esc(ad.ad_id)}')" title="${esc(l.title)}">${esc(l.title || 'Untitled Product')}</div>
               <div class="card-meta">
-                <span>${esc(ad.page_name)} · ∑ ${cumDays}d spend</span>
+                <span>${esc(ad.page_name)} · ∑ ${cumDays}d${estSpend > 0 ? ` · ~$${estSpend.toFixed(0)} spend` : ''}</span>
                 <span class="mono">${hasWs ? `Опт <b>${wsUah.toFixed(0)}₴</b> → ` : ''}Retail <b>${retUah != null ? retUah.toFixed(0) + '₴' : '—'}</b></span>
               </div>
               ${hasWs ? `
@@ -942,23 +969,28 @@
       tbody.innerHTML = rows.map((item) => {
         const ad = item.ad, l = item.landing, m = item.margin, e = item.economics || {};
         const score = Number(e.opportunity_score || 0);
-        const pic = imgSrc(item.image_url || l.image_url);
+        const rawPrimary = item.image_url || l.image_url || ad.ad_creative_image_url;
+        const rawFallback = item.fallback_image_url || l.fallback_image_url || ad.ad_creative_image_url || '';
+        const pic = imgSrc(rawPrimary || rawFallback);
+        const fbArg = (rawFallback && rawFallback !== rawPrimary) ? rawFallback : '';
         const prodUrl = item.product_url || l.final_url || l.url;
         const supUrl = item.supplier_url || item.prom_wholesale_url || item.yml_url;
         const hasWs = item.wholesale_match_status !== 'none' && item.wholesale_uah != null;
         const retUah = item.retail_uah != null ? `${Number(item.retail_uah).toFixed(0)}₴` : '—';
+        const estSpend = Number(item.est_spend_usd ?? ad.est_spend_usd ?? 0);
+        const isCod = Boolean(item.is_cod_lander ?? l.is_cod_lander);
         return `
           <tr onclick="openDrawer('${esc(ad.ad_id)}')">
             <td>
               <div class="prod-cell">
-                <img class="prod-thumb" src="${esc(pic)}" alt="" onerror="this.onerror=null;this.src='${FALLBACK_SVG}'" />
+                <img class="prod-thumb" src="${esc(pic)}" alt="" onerror="handleImgFallback(this,'${esc(fbArg)}')" />
                 <div>
                   <div class="prod-title">${esc(l.title || 'Untitled')}</div>
-                  <div class="prod-sub">${esc(ad.page_name)} · ${ad.days_running}d · ${Number(item.total_matching_ads || 1)} ads</div>
+                  <div class="prod-sub">${esc(ad.page_name)} · ${ad.days_running}d (3–14d) · ${Number(item.total_matching_ads || 1)} ads${estSpend > 0 ? ` · ~$${estSpend.toFixed(0)}` : ''}</div>
                 </div>
               </div>
             </td>
-            <td><span class="badge badge-src">${esc(item.source || ad.source)}</span> <span class="prod-sub">${esc(l.core_phrase || item.category || '')}</span></td>
+            <td><span class="badge badge-src">${esc(item.source || ad.source)}</span> ${isCod ? '<span class="badge badge-win">COD</span> ' : ''}<span class="prod-sub">${esc(l.core_phrase || item.category || '')}</span></td>
             <td><span class="score-pill ${scoreBadgeClass(score)}">${score.toFixed(0)}</span> <span class="badge">${esc(e.recommended_model || 'UNVERIFIED')}</span></td>
             <td class="mono">${hasWs ? `${Number(item.ua_net_profit_uah || 0).toFixed(0)}₴ ($${Number(e.ua_cod_net_profit_usd || 0).toFixed(2)})` : '<span class="text-warn">No verified wholesale</span>'}</td>
             <td class="mono">${hasWs ? `${Number(item.wholesale_uah).toFixed(0)}₴ → ${retUah}` : `Retail ${retUah}`}</td>
@@ -975,11 +1007,17 @@
       const item = (state.report?.products || []).find((p) => p.ad.ad_id === adId);
       if (!item) return;
       const ad = item.ad, l = item.landing, m = item.margin, e = item.economics || {};
-      const pic = imgSrc(item.image_url || l.image_url || ad.ad_creative_image_url);
+      const rawPrimary = item.image_url || l.image_url || ad.ad_creative_image_url;
+      const rawFallback = item.fallback_image_url || l.fallback_image_url || ad.ad_creative_image_url || '';
+      const pic = imgSrc(rawPrimary || rawFallback);
+      const fbArg = (rawFallback && rawFallback !== rawPrimary) ? rawFallback : '';
+      delete $('drawerImg').dataset.triedFallback;
+      $('drawerImg').onerror = () => handleImgFallback($('drawerImg'), fbArg);
       $('drawerImg').src = pic;
-      $('drawerImg').onerror = () => { $('drawerImg').src = FALLBACK_SVG; };
+      const estSpend = Number(item.est_spend_usd ?? ad.est_spend_usd ?? 0);
+      const isCod = Boolean(item.is_cod_lander ?? l.is_cod_lander);
       $('drawerTitle').textContent = l.title || 'Untitled Offer';
-      $('drawerMeta').textContent = `${ad.page_name} · ${(item.source || ad.source).toUpperCase()} · ${item.category || 'General'}`;
+      $('drawerMeta').textContent = `${ad.page_name} · ${ad.days_running}d (3–14d)${estSpend > 0 ? ` · ~$${estSpend.toFixed(0)} spend` : ''}${isCod ? ' · COD Lander' : ''}`;
       $('drawerPlatform').textContent = l.platform || 'Live';
       $('drawerWinnerBadge').textContent = m.is_winner ? 'IS_WINNER' : 'REVIEW';
       $('drawerWinnerBadge').className = `badge ${m.is_winner ? 'badge-win' : 'badge-warn'}`;
@@ -1225,7 +1263,9 @@
             proxy_url: $('scanProxy').value.trim() || null,
             mock: $('toggleMock').checked,
             min_duration_days: Number($('thMinDays').value),
+            max_ad_age_days: Number($('thMaxAge').value),
             min_active_ad_sets: Number($('thMinSets').value),
+            min_est_spend_usd: Number($('thMinSpend').value),
             shipping_cost_est_usd: Number($('thShipping').value),
             est_cpa_usd: Number($('thCpa').value),
             winner_net_margin_usd: Number($('thWinnerMin').value),
@@ -1272,7 +1312,9 @@
       state.report = await repRes.json();
 
       $('thMinDays').value = state.config.min_duration_days;
+      $('thMaxAge').value = state.config.max_ad_age_days ?? 14;
       $('thMinSets').value = state.config.min_active_ad_sets;
+      $('thMinSpend').value = state.config.min_est_spend_usd ?? 100;
       $('thShipping').value = state.config.shipping_cost_est_usd;
       $('thCpa').value = state.config.est_cpa_usd;
       $('thWinnerMin').value = state.config.winner_net_margin_usd;
@@ -1280,7 +1322,6 @@
       renderCategoriesAndBlocks();
       renderSummary();
       renderProducts();
-      loadTrendsForGeo();
       loadTyverQuota();
       runSimulation();
 
@@ -1478,7 +1519,14 @@
     $('tyverNextCursorBtn').onclick = () => searchTyver(true);
     $('runScanBtn').onclick = () => runScan(false);
     $('superParseBtn').onclick = () => runScan(true);
-    $('trendsGeo').onchange = loadTrendsForGeo;
+    $('trendsGeo').onchange = () => { if ($('trendsRow').style.display !== 'none') loadTrendsForGeo(); };
+    $('toggleTrendsBtn').onclick = () => {
+      const row = $('trendsRow');
+      const open = row.style.display === 'none';
+      row.style.display = open ? 'flex' : 'none';
+      $('toggleTrendsBtn').textContent = open ? '📈 Приховати Google Trends' : '📈 Показати Google Trends (опційно)';
+      if (open) loadTrendsForGeo();
+    };
     $('runSimBtn').onclick = runSimulation;
     $('addTgBtn').onclick = addTgChannel;
     $('toggleThresholdsBtn').onclick = () => { const p = $('thresholdsPanel'); p.style.display = p.style.display === 'none' ? 'grid' : 'none'; };

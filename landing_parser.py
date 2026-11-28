@@ -3,22 +3,90 @@ import json
 import logging
 import re
 from typing import Any, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 import httpx
 from playwright.async_api import async_playwright
 
-from config import DEFAULT_FX_RATES_TO_USD, LandingPageData, make_product_placeholder_svg
-from product_matcher import extract_core_phrase, extract_model_tokens
+from config import (
+    DEFAULT_FX_RATES_TO_USD,
+    DROPSHIP_DOMAIN_TLDS,
+    LandingPageData,
+    make_product_placeholder_svg,
+)
+from product_matcher import extract_core_phrase, extract_model_tokens, is_valid_core_phrase
 
 logger = logging.getLogger(__name__)
 
 _SKIP_IMAGE_MARKERS: tuple[str, ...] = (
-    "favicon", "logo", "sprite", "pixel", "1x1", "spacer", "badge", "icon", ".svg", "data:image/svg",
+    "favicon",
+    "logo",
+    "sprite",
+    "pixel",
+    "1x1",
+    "spacer",
+    "badge",
+    "icon",
+    ".svg",
+    "data:image/",
+    "facebook.com/tr",
+    "/tr?",
+    "ev=pageview",
+    "google-analytics",
+    "googletagmanager",
+    "mc.yandex",
+    "doubleclick",
+    "gtag",
+    "tiktok.com",
+    "analytics",
+    "placeholder",
 )
 _INSTALLMENT_STRIP_RE = re.compile(
     r"(?:від|от)?\s*\d[\d\s\u00a0]*(?:[.,]\d{1,2})?\s*(?:₴|грн\.?|UAH)?\s*/\s*міс(?:\.|яц[ьі]?)?",
+    re.IGNORECASE,
+)
+_DELIVERY_OR_PERCENT_STRIP_RE = re.compile(
+    r"(?:доставка|передоплата|предоплата|економія|экономия|вигода)\s*(?:від|от)?\s*\d[\d\s\u00a0]*(?:[.,]\d{1,2})?\s*(?:₴|грн\.?|UAH|%)?",
+    re.IGNORECASE,
+)
+_GENERIC_CATALOG_TITLES: frozenset[str] = frozenset({
+    "бестселери",
+    "бестселлеры",
+    "каталог",
+    "каталог товарів",
+    "каталог товаров",
+    "акційні товари",
+    "акционные товары",
+    "розпродаж",
+    "распродажа",
+    "новинки",
+    "магазин",
+    "головна",
+    "главная",
+    "всі товари",
+    "все товары",
+    "bestsellers",
+    "catalog",
+    "catalogue",
+    "sale",
+    "shop",
+    "all products",
+})
+_CATALOG_PATH_RE = re.compile(r"/(?:collections?|catalog(?:ue)?|categor(?:y|ies)|sale|novinki|bestsellers?)(?:/|$)", re.I)
+_SINGLE_PRODUCT_PATH_RE = re.compile(r"/(?:p|product|item|offer)/\d+", re.I)
+_UA_COD_MARKERS: tuple[str, ...] = (
+    "нова пошта",
+    "оплата при отриманні",
+    "оплата при получении",
+    "післяплата",
+    "накладений платіж",
+    "відправка сьогодні",
+    "замовити зі знижкою",
+    "до кінця акції",
+)
+_TITLE_PRICE_SUFFIX_RE = re.compile(
+    r"\s*(?:\||—|–|-)\s*(?:\d[\d\s\u00a0]*(?:[.,]\d{1,2})?\s*(?:₴|грн\.?|UAH|\$|€|zł)|купити.*|купить.*|офіційний сайт.*)\s*$",
     re.IGNORECASE,
 )
 
@@ -146,6 +214,18 @@ def _extract_from_json_ld(soup: BeautifulSoup) -> tuple[Optional[float], Optiona
     return None, None, None
 
 
+def _is_valid_dom_price(price: Optional[float], currency: Optional[str]) -> bool:
+    """Reject 0/micro-prices such as 9 UAH discounts or tiny shipping fees."""
+    if price is None or price <= 0:
+        return False
+    code = (currency or "UAH").strip().upper()
+    if code == "UAH":
+        return price >= 50.0
+    if code == "PLN":
+        return price >= 10.0
+    return price >= 2.0
+
+
 def _extract_price_and_currency(soup: BeautifulSoup) -> tuple[Optional[float], Optional[str]]:
     """Extract offer price and currency from meta tags, JSON-LD, or DOM text."""
     # 1. OpenGraph / product meta tags
@@ -154,74 +234,113 @@ def _extract_price_and_currency(soup: BeautifulSoup) -> tuple[Optional[float], O
     if meta_price and meta_price.get("content"):
         parsed_price = _parse_number(str(meta_price["content"]))
         parsed_curr = _normalize_currency(str(meta_curr["content"])) if meta_curr and meta_curr.get("content") else None
-        if parsed_price is not None:
+        if parsed_price is not None and _is_valid_dom_price(parsed_price, parsed_curr or "USD"):
             return parsed_price, parsed_curr
 
     # 2. JSON-LD offers
     ld_price, ld_curr, _ = _extract_from_json_ld(soup)
-    if ld_price is not None:
+    if ld_price is not None and _is_valid_dom_price(ld_price, ld_curr or "USD"):
         return ld_price, ld_curr
 
-    # 3. Targeted active price containers (skipping <del>/<s>/old-price nodes and /міс installments)
+    # 3. Targeted active price containers (skipping <del>/<s>/old-price nodes, /міс installments, and micro-prices)
+    def _clean_price_text(raw: str) -> str:
+        cleaned = _INSTALLMENT_STRIP_RE.sub(" ", raw)
+        return _DELIVERY_OR_PERCENT_STRIP_RE.sub(" ", cleaned)
+
     candidates: list[str] = []
     for selector in (
         "[itemprop='price']",
         ".price-new",
         ".current-price",
+        ".promo-price",
+        ".new-price",
         ".product-price",
         ".offer-price",
         ".t-store__card__price",
         ".price",
     ):
         for node in soup.select(selector):
+            if node.find_parent(["del", "s", "strike"]):
+                continue
+            cls_str = " ".join(node.get("class") or []).lower()
+            if "old" in cls_str or "compare" in cls_str:
+                continue
             text = node.get("content") or node.get_text(" ", strip=True)
             if text:
-                candidates.append(_INSTALLMENT_STRIP_RE.sub(" ", str(text)))
+                candidates.append(_clean_price_text(str(text)))
 
     body_clone = BeautifulSoup(str(soup), "html.parser")
-    for old_tag in body_clone.select("del, s, strike, .old-price, .price-old, [class*='old-price'], [class*='compare']"):
+    for old_tag in body_clone.select("del, s, strike, .old-price, .price-old, [class*='old-price'], [class*='price-old'], [class*='compare']"):
         old_tag.decompose()
-    candidates.append(_INSTALLMENT_STRIP_RE.sub(" ", body_clone.get_text(" ", strip=True)))
+    candidates.append(_clean_price_text(body_clone.get_text(" ", strip=True)))
 
     for text in candidates:
         for currency_code, pattern in _CURRENCY_PATTERNS:
-            match = pattern.search(text)
-            if match:
+            for match in pattern.finditer(text):
                 num_str = match.group("num1") or match.group("num2")
                 parsed = _parse_number(num_str)
-                if parsed is not None:
+                if _is_valid_dom_price(parsed, currency_code):
                     return parsed, currency_code
     return None, None
 
 
+def _clean_raw_title(title: Optional[str]) -> Optional[str]:
+    if not title:
+        return None
+    cleaned = re.sub(r"\s+", " ", title).strip()
+    cleaned = _TITLE_PRICE_SUFFIX_RE.sub("", cleaned).strip(" -|—–")
+    return cleaned or None
+
+
+def _is_generic_catalog_title(title: Optional[str]) -> bool:
+    if not title:
+        return True
+    norm = re.sub(r"[^\w\sа-яіїєґ]", " ", title.lower()).strip()
+    norm = re.sub(r"\s+", " ", norm)
+    return norm in _GENERIC_CATALOG_TITLES
+
+
 def _extract_title(soup: BeautifulSoup) -> Optional[str]:
-    """Extract product title preferring og:title, then h1, then <title>."""
+    """Extract real product title preferring og:title, then h1, then <title>, skipping generic headers."""
+    candidates: list[str] = []
     og_title = soup.find("meta", attrs={"property": "og:title"})
     if og_title and og_title.get("content"):
-        title = str(og_title["content"]).strip()
-        if title:
-            return title
-    h1 = soup.find("h1")
-    if h1:
-        text = h1.get_text(" ", strip=True)
-        if text:
-            return text
+        t = _clean_raw_title(str(og_title["content"]))
+        if t:
+            candidates.append(t)
+    for h1 in soup.find_all("h1"):
+        t = _clean_raw_title(h1.get_text(" ", strip=True))
+        if t:
+            candidates.append(t)
     if soup.title:
-        text = soup.title.get_text(" ", strip=True)
-        if text:
-            return text
-    return None
+        t = _clean_raw_title(soup.title.get_text(" ", strip=True))
+        if t:
+            candidates.append(t)
+
+    for cand in candidates:
+        if not _is_generic_catalog_title(cand):
+            return cand
+    return candidates[0] if candidates else None
 
 
-def _is_usable_hero_img(url: str) -> bool:
+def _is_usable_hero_img(url: str, img_tag: Any = None) -> bool:
     low = (url or "").strip().lower()
     if not low or any(m in low for m in _SKIP_IMAGE_MARKERS):
         return False
+    if img_tag is not None:
+        for attr in ("width", "height"):
+            val = str(img_tag.get(attr) or "").strip()
+            if val.isdigit() and int(val) <= 5:
+                return False
     return True
 
 
-def _extract_image_url(soup: BeautifulSoup, base_url: str) -> Optional[str]:
-    """Extract primary hero product image URL skipping icons/logos/tracking pixels."""
+def _extract_image_url(
+    soup: BeautifulSoup,
+    base_url: str,
+    fallback_image_url: Optional[str] = None,
+) -> Optional[str]:
+    """Extract primary hero product image URL skipping pixels/icons/SVGs, with Tyver CDN fallback."""
     og_img = soup.find("meta", attrs={"property": "og:image"})
     if og_img and og_img.get("content"):
         resolved = urljoin(base_url, str(og_img["content"]).strip())
@@ -240,20 +359,113 @@ def _extract_image_url(soup: BeautifulSoup, base_url: str) -> Optional[str]:
             if not raw_src:
                 continue
             resolved = urljoin(base_url, str(raw_src).strip())
-            if _is_usable_hero_img(resolved):
+            if _is_usable_hero_img(resolved, img_tag=img):
                 return resolved
+
+    if fallback_image_url and _is_usable_hero_img(fallback_image_url):
+        return fallback_image_url
     return None
 
 
-def parse_landing_html(html: str, url: str) -> LandingPageData:
-    """Parse HTML string into structured LandingPageData with core_phrase & model_code."""
+def detect_cod_lander_dna(
+    html: str,
+    url: str,
+    soup: Optional[BeautifulSoup] = None,
+    title: Optional[str] = None,
+) -> dict[str, Any]:
+    """Score single-product UA COD dropship DNA and flag generic multi-product catalogs."""
+    active_soup = soup or BeautifulSoup(html or "", "html.parser")
+    signals: list[str] = []
+    score = 0
+
+    # 1. COD <form> containing both name and phone inputs
+    has_cod_form = False
+    for form in active_soup.find_all("form"):
+        has_phone = False
+        has_name = False
+        for inp in form.find_all(["input", "textarea"]):
+            inp_type = str(inp.get("type") or "").lower()
+            if inp_type in ("hidden", "submit", "button", "checkbox", "radio"):
+                continue
+            blob = " ".join(
+                str(inp.get(k) or "") for k in ("type", "name", "id", "placeholder", "aria-label")
+            ).lower()
+            if inp_type == "tel" or any(k in blob for k in ("phone", "tel", "телефон", "моб")):
+                has_phone = True
+            if any(k in blob for k in ("name", "ім", "имя", "фіо", "фио", "pib", "client", "customer")):
+                has_name = True
+        if has_phone and has_name:
+            has_cod_form = True
+            break
+    if has_cod_form:
+        signals.append("cod_order_form")
+        score += 40
+
+    # 2. Strike-out old price + promo pricing
+    has_old_price = bool(
+        active_soup.select("del, s, strike, .old-price, .price-old, [class*='old-price'], [class*='price-old'], [class*='compare']")
+    )
+    if has_old_price:
+        signals.append("strike_promo_price")
+        score += 20
+
+    # 3. Ukrainian COD / Nova Poshta markers
+    body_text_lower = active_soup.get_text(" ", strip=True).lower()
+    if any(marker in body_text_lower for marker in _UA_COD_MARKERS):
+        signals.append("ua_cod_markers")
+        score += 25
+
+    # 4. Dropship URL / subdomain structure (e.g. massgun.domely.com.ua, testishop.shop/p/0179, legs.zario.space)
+    parsed = urlparse((url or "").strip())
+    host = parsed.netloc.lower().split(":")[0].removeprefix("www.")
+    path = parsed.path or ""
+    labels = [p for p in host.split(".") if p]
+    is_subdomain_farm = (host.endswith(".com.ua") and len(labels) >= 4) or (not host.endswith(".com.ua") and len(labels) >= 3)
+    has_dropship_tld = any(host.endswith(tld) for tld in DROPSHIP_DOMAIN_TLDS if tld != ".com.ua")
+    if _SINGLE_PRODUCT_PATH_RE.search(path) or is_subdomain_farm or has_dropship_tld:
+        signals.append("dropship_url_dna")
+        score += 15
+
+    # Generic storefront/catalog detection
+    extracted_title = title if title is not None else _extract_title(active_soup)
+    catalog_card_count = len(active_soup.select(".product-card, .catalog-item, .product-grid-item, .products-grid > *"))
+    is_catalog_url = bool(_CATALOG_PATH_RE.search(path))
+    is_generic_title = _is_generic_catalog_title(extracted_title)
+    is_generic_catalog = bool(
+        is_generic_title
+        or (is_catalog_url and not has_cod_form)
+        or (catalog_card_count >= 6 and not has_cod_form)
+    )
+
+    is_cod_lander = bool((score >= 40 or has_cod_form) and not is_generic_catalog)
+    return {
+        "is_cod_lander": is_cod_lander,
+        "cod_score": min(100, score),
+        "cod_signals": signals,
+        "is_generic_catalog": is_generic_catalog,
+    }
+
+
+def parse_landing_html(
+    html: str,
+    url: str,
+    fallback_image_url: Optional[str] = None,
+) -> LandingPageData:
+    """Parse HTML string into structured LandingPageData with core_phrase, model_code & COD DNA."""
     soup = BeautifulSoup(html, "html.parser")
     raw_title = _extract_title(soup)
     price, currency = _extract_price_and_currency(soup)
-    image_url = _extract_image_url(soup, url)
+    image_url = _extract_image_url(soup, url, fallback_image_url=fallback_image_url)
     platform = detect_platform(html, url)
+    dna = detect_cod_lander_dna(html, url, soup=soup, title=raw_title)
 
     core_phrase = extract_core_phrase(raw_title or "", max_words=4)
+    if dna["is_generic_catalog"] or not is_valid_core_phrase(core_phrase, min_tokens=2):
+        # Flag single-word or generic catalog titles so downstream arbitrage drops them cleanly.
+        if _is_generic_catalog_title(raw_title):
+            dna["is_generic_catalog"] = True
+            dna["is_cod_lander"] = False
+
     models = sorted(extract_model_tokens(raw_title or ""))
     model_code = models[0] if models else ""
 
@@ -267,6 +479,10 @@ def parse_landing_html(html: str, url: str) -> LandingPageData:
         platform=platform,
         core_phrase=core_phrase,
         model_code=model_code,
+        is_cod_lander=dna["is_cod_lander"],
+        cod_score=dna["cod_score"],
+        cod_signals=dna["cod_signals"],
+        is_generic_catalog=dna["is_generic_catalog"],
     )
 
 
@@ -275,6 +491,7 @@ async def fetch_landing_page_fast(
     client: Optional[httpx.AsyncClient] = None,
     timeout_s: float = 10.0,
     browser: Any = None,
+    fallback_image_url: Optional[str] = None,
 ) -> LandingPageData:
     """Try fast HTTPX fetch first, falling back to Playwright only when HTML lacks title/price."""
     headers = {
@@ -286,11 +503,9 @@ async def fetch_landing_page_fast(
         try:
             resp = await http_client.get(url, headers=headers)
             if resp.status_code == 200 and resp.text:
-                parsed = parse_landing_html(resp.text, str(resp.url))
+                parsed = parse_landing_html(resp.text, str(resp.url), fallback_image_url=fallback_image_url)
                 parsed.url = url
                 parsed.final_url = str(resp.url)
-                if parsed.title and parsed.price:
-                    return parsed
                 return parsed
         except httpx.HTTPError:
             pass
@@ -307,9 +522,17 @@ async def fetch_landing_page_fast(
         return parsed_fast
 
     try:
-        return await fetch_landing_page(url, timeout_ms=int(timeout_s * 1000), browser=browser)
+        pw_res = await fetch_landing_page(url, timeout_ms=int(timeout_s * 1000), browser=browser)
+        if not pw_res.image_url and fallback_image_url and _is_usable_hero_img(fallback_image_url):
+            pw_res.image_url = fallback_image_url
+        return pw_res
     except Exception:
-        return parsed_fast or LandingPageData(url=url, final_url=url, platform="Custom PHP")
+        return parsed_fast or LandingPageData(
+            url=url,
+            final_url=url,
+            image_url=fallback_image_url if fallback_image_url and _is_usable_hero_img(fallback_image_url) else None,
+            platform="Custom PHP",
+        )
 
 
 def to_uah(price: Optional[float], currency: Optional[str], usd_to_uah: float = 41.67) -> Optional[float]:

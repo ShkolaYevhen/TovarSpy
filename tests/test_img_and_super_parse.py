@@ -203,8 +203,9 @@ class TestImgProxyAndSuperParse(unittest.IsolatedAsyncioTestCase):
                     if "celestron" in u.lower():
                         items = [{**stage1_ads[1], "provider_id": f"c{i}", "provider_page_name": f"Astro{i}"} for i in range(6)]
                         return httpx.Response(200, json={"detail": "Success", "data": {"items": items, "total": 6}})
-                    items = [{**stage1_ads[0], "provider_id": f"b{i}", "provider_page_name": f"Blend{i}"} for i in range(7)]
-                    return httpx.Response(200, json={"detail": "Success", "data": {"items": items, "total": 7}})
+                    if "minijuice" in u.lower() or "%D0%B1%D0%BB%D0%B5%D0%BD%D0%B4%D0%B5%D1%80" in u.lower():
+                        items = [{**stage1_ads[0], "provider_id": f"b{i}", "provider_page_name": f"Blend{i}"} for i in range(7)]
+                        return httpx.Response(200, json={"detail": "Success", "data": {"items": items, "total": 7}})
                 return httpx.Response(200, json={"detail": "Success", "data": {"items": stage1_ads, "total": 3}})
             if "blendshop.com.ua" in host:
                 return httpx.Response(200, text="<html><head><meta property='og:title' content='Портативний блендер USB MiniJuice'/><meta property='product:price:amount' content='990'/><meta property='product:price:currency' content='UAH'/></head></html>")
@@ -244,6 +245,110 @@ class TestImgProxyAndSuperParse(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(reports[1].best_supplier)
         self.assertIsNone(reports[1].economics.ua_net_profit_uah)
         self.assertEqual(reports[1].economics.recommended_model, "UNVERIFIED")
+        self.assertGreaterEqual(reports[0].est_spend_usd, 100.0)
+
+    async def test_5stage_rejects_generic_catalog_low_spend_preserves_distinct_and_thumb_fallback(self) -> None:
+        settings_tyv = Settings(
+            _env_file=None,
+            DB_PATH=str(Path(self.tmp_dir.name) / "gates.db"),
+            TYVER_API_KEY="tyv_test_gates",
+            MIN_DURATION_DAYS=3,
+            MAX_AD_AGE_DAYS=14,
+            MIN_ACTIVE_AD_SETS=5,
+            MIN_EST_SPEND_USD=100.0,
+            SKIP_CHINA_SOURCING=True,
+        )
+        stage1_ads = [
+            {
+                "provider_id": "cat1",
+                "activity_days_amount": 7,
+                "bodies": ["Бестселери магазину"],
+                "link_titles": ["Бестселери"],
+                "countries": ["UA"],
+                "provider_page_name": "CatShop",
+                "target_url": "https://catshop.com.ua/",
+                "cta": "Shop Now",
+            },
+            {
+                "provider_id": "m_back",
+                "activity_days_amount": 8,
+                "bodies": ["Масажер перкусійний пістолет спина"],
+                "link_titles": ["Масажер перкусійний спина"],
+                "countries": ["UA"],
+                "provider_page_name": "BackShop",
+                "target_url": "https://back.zario.space/",
+                "cta": "Shop Now",
+                "media": [{"content_type": "image/jpeg", "compressed_image_url": "https://cdn.b2.test/back-thumb.jpg"}],
+            },
+            {
+                "provider_id": "m_legs",
+                "activity_days_amount": 9,
+                "bodies": ["Масажний коврик електричний для ступнів"],
+                "link_titles": ["Масажний коврик для ступнів"],
+                "countries": ["UA"],
+                "provider_page_name": "LegsShop",
+                "target_url": "https://legs.zario.space/",
+                "cta": "Order Now",
+                "media": [{"content_type": "image/jpeg", "compressed_image_url": "https://cdn.b2.test/legs-thumb.jpg"}],
+            },
+            {
+                "provider_id": "low_spend",
+                "activity_days_amount": 3,
+                "bodies": ["Дешевий товар на низькому бюджеті"],
+                "link_titles": ["Килимок магнітний кухонний"],
+                "countries": ["UA"],
+                "provider_page_name": "CheapShop",
+                "target_url": "https://cheap.shop/p/12",
+                "cta": "Shop Now",
+            },
+        ]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            host = request.url.host
+            if "api.tyver.io" in host:
+                search_q = (request.url.params.get("search") or "").lower()
+                if search_q:
+                    if "перкус" in search_q or "спин" in search_q:
+                        items = [{**stage1_ads[1], "provider_id": f"bk{i}", "provider_page_name": f"B{i}", "activity_days_amount": 4} for i in range(5)]
+                        return httpx.Response(200, json={"detail": "Success", "data": {"items": items, "total": 5}})
+                    if "коврик" in search_q or "ступн" in search_q or "масажн" in search_q:
+                        items = [{**stage1_ads[2], "provider_id": f"lg{i}", "provider_page_name": f"L{i}", "activity_days_amount": 5} for i in range(5)]
+                        return httpx.Response(200, json={"detail": "Success", "data": {"items": items, "total": 5}})
+                    if "килимок" in search_q:
+                        # 3 ads * 3 days ($72 < $100 spend gate AND < 5 ads) -> rejected
+                        items = [{**stage1_ads[3], "provider_id": f"lp{i}", "provider_page_name": f"C{i}", "activity_days_amount": 3} for i in range(3)]
+                        return httpx.Response(200, json={"detail": "Success", "data": {"items": items, "total": 3}})
+                return httpx.Response(200, json={"detail": "Success", "data": {"items": stage1_ads, "total": 4}})
+            if "catshop.com.ua" in host:
+                return httpx.Response(200, text="<html><head><title>Бестселери</title></head><body><h1>Бестселери</h1><span class='price'>9₴</span></body></html>")
+            if "back.zario.space" in host:
+                # Only FB tracking pixel <img> on page -> must inherit Tyver CDN thumbnail_url!
+                return httpx.Response(200, text="<html><head><title>Масажер перкусійний пістолет спина | 699 грн</title></head><body><img src='https://www.facebook.com/tr?id=99&ev=PageView'/><form><input name='name'/><input name='phone'/></form><del>1199 грн</del><span class='promo-price'>699 грн</span></body></html>")
+            if "legs.zario.space" in host:
+                return httpx.Response(200, text="<html><head><title>Масажний коврик електричний для ступнів</title></head><body><form><input name='name'/><input name='phone'/></form><span class='price'>549 грн</span><img src='/assets/legs.jpg'/></body></html>")
+            if "cheap.shop" in host:
+                return httpx.Response(200, text="<html><head><title>Килимок магнітний кухонний</title></head><body><span class='price'>399 грн</span></body></html>")
+            return httpx.Response(200, text="")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock_http:
+            res = await run_super_parse(
+                output_dir=self.tmp_dir.name,
+                settings=settings_tyv,
+                client=mock_http,
+            )
+
+        reports = res["reports"]
+        titles = [r.landing.core_phrase for r in reports]
+        # Catalog & low_spend excluded; two distinct massagers NOT merged!
+        self.assertEqual(len(reports), 2)
+        self.assertTrue(any("перкусійний" in t for t in titles))
+        self.assertTrue(any("коврик" in t for t in titles))
+        back_report = next(r for r in reports if "перкусійний" in r.landing.core_phrase)
+        self.assertEqual(back_report.landing.image_url, "https://cdn.b2.test/back-thumb.jpg")
+        self.assertEqual(back_report.landing.fallback_image_url, "https://cdn.b2.test/back-thumb.jpg")
+        self.assertTrue(back_report.landing.is_cod_lander)
+        self.assertGreaterEqual(back_report.est_spend_usd, 100.0)
+        self.assertEqual(res["trending_keywords"], [])
 
 
 if __name__ == "__main__":

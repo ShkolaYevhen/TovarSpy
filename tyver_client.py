@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, timedelta
 import logging
 from typing import Any, Optional
@@ -5,7 +6,16 @@ from urllib.parse import urlparse
 
 import httpx
 
-from product_matcher import _token_overlap_score, normalize_product_tokens
+from config import (
+    COD_DISCOVERY_SIGNALS,
+    DROPSHIP_CTAS,
+    EST_DAILY_SPEND_PER_CREATIVE_USD,
+    MARKETPLACE_BLOCKLIST,
+    MAX_AD_AGE_DAYS,
+    MIN_DURATION_DAYS,
+    MIN_EST_SPEND_USD,
+)
+from product_matcher import _token_overlap_score, is_valid_core_phrase, normalize_product_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +35,13 @@ _JUNK_STORE_DOMAINS: tuple[str, ...] = (
     "apps.apple.com",
     "wa.me",
     "viber.com",
+) + MARKETPLACE_BLOCKLIST
+
+_COLLECTION_URL_HINTS: tuple[str, ...] = (
+    "/collections",
+    "/catalog",
+    "/category",
+    "/categories",
 )
 
 _NON_ECOM_KEYWORDS: tuple[str, ...] = (
@@ -135,15 +152,24 @@ def _pick_media(media_list: Any) -> tuple[Optional[str], Optional[str], str]:
     ctype = str(first.get("content_type") or "").lower()
     is_video = "video" in ctype or bool(first.get("video_preview") or first.get("video_image_preview_url"))
 
-    thumb = (
-        first.get("compressed_video_image_preview_url")
-        or first.get("video_image_preview_url")
-        or first.get("compressed_image_url")
-        or (first.get("url") if not is_video else None)
-    )
+    thumb = None
     video_url = first.get("url") if is_video else None
-    if not thumb and isinstance(first.get("video_preview"), dict):
-        thumb = first["video_preview"].get("url")
+    for entry in media_list:
+        if not isinstance(entry, dict):
+            continue
+        e_ctype = str(entry.get("content_type") or "").lower()
+        e_is_video = "video" in e_ctype or bool(entry.get("video_preview") or entry.get("video_image_preview_url"))
+        candidate_thumb = (
+            entry.get("compressed_video_image_preview_url")
+            or entry.get("video_image_preview_url")
+            or entry.get("compressed_image_url")
+            or (entry.get("url") if not e_is_video else None)
+        )
+        if not candidate_thumb and isinstance(entry.get("video_preview"), dict):
+            candidate_thumb = entry["video_preview"].get("url")
+        if candidate_thumb:
+            thumb = str(candidate_thumb).strip()
+            break
     return thumb, video_url, ("VIDEO" if is_video else "IMAGE")
 
 
@@ -176,6 +202,7 @@ def normalize_tyver_creative(raw: dict[str, Any]) -> dict[str, Any]:
         "countries": [str(c).upper() for c in (raw.get("countries") or [])],
         "activity_days": int(raw.get("activity_days_amount") or 0),
         "is_active": bool(raw.get("is_active", True)),
+        "creation_time": raw.get("creation_time"),
         "first_active_date": raw.get("first_active_date"),
         "last_active_date": raw.get("last_active_date"),
         "ai_category": raw.get("ai_category") or ("GAMBLING" if "GAMBLING" in (raw.get("verticals") or []) else None),
@@ -197,6 +224,7 @@ async def fetch_tyver_creatives(
     ai_angle: Optional[str] = None,
     ai_gambling_game_type: Optional[str] = None,
     activity_days_amount_gte: Optional[int] = None,
+    activity_days_amount_lte: Optional[int] = None,
     creation_date_gte: Optional[str] = None,
     languages: Optional[list[str]] = None,
     cta: Optional[str | list[str]] = None,
@@ -242,6 +270,8 @@ async def fetch_tyver_creatives(
         params.append(("search", clean_q))
     if activity_days_amount_gte is not None and activity_days_amount_gte >= 0:
         params.append(("activity_days_amount_gte", int(activity_days_amount_gte)))
+    if activity_days_amount_lte is not None and activity_days_amount_lte >= 0:
+        params.append(("activity_days_amount_lte", int(activity_days_amount_lte)))
     if creation_date_gte:
         params.append(("creation_date_gte", creation_date_gte.strip()))
     for lang in (languages or []):
@@ -315,14 +345,66 @@ def _normalize_store_key(url: str) -> str:
     return f"{host}{path}" if host else (url or "").strip().lower()
 
 
+def _parse_iso_date(val: Any) -> Optional[date]:
+    text = str(val or "").strip()
+    if len(text) < 10:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def within_ad_age_window(
+    creative: dict[str, Any],
+    *,
+    min_days: int = MIN_DURATION_DAYS,
+    max_age_days: int = MAX_AD_AGE_DAYS,
+    today: Optional[date] = None,
+) -> bool:
+    """Ensure ad has run at least `min_days` and is not older than `max_age_days`."""
+    days = int(creative.get("activity_days") or 0)
+    if days < min_days or days > max_age_days:
+        return False
+    ref_today = today or date.today()
+    for date_key in ("creation_time", "first_active_date"):
+        created = _parse_iso_date(creative.get(date_key))
+        if created is not None and (ref_today - created).days > max_age_days:
+            return False
+    return True
+
+
+def estimate_ad_spend_usd(
+    cumulative_active_days: int,
+    total_impressions: int = 0,
+    daily_spend_usd: float = EST_DAILY_SPEND_PER_CREATIVE_USD,
+) -> tuple[float, str]:
+    """Estimate cumulative ad spend across active creatives from active days and EU impressions."""
+    days_spend = round(max(0, int(cumulative_active_days)) * float(daily_spend_usd), 2)
+    if total_impressions and int(total_impressions) > 0:
+        impr_spend = round((int(total_impressions) / 1000.0) * 5.0, 2)
+        return max(days_spend, impr_spend), "cumulative_days+impressions"
+    return days_spend, "cumulative_days"
+
+
 def is_ecom_store_candidate(creative: dict[str, Any]) -> bool:
     """Return True if a Tyver creative targets a genuine physical-goods web store/landing."""
     landing = str(creative.get("landing_url") or "").strip()
     if not landing.startswith(("http://", "https://")):
         return False
     parsed = urlparse(landing)
-    host = parsed.netloc.lower()
-    if not host or any(junk in host for junk in _JUNK_STORE_DOMAINS):
+    host = parsed.netloc.lower().split(":")[0].removeprefix("www.")
+    if not host:
+        return False
+    for junk in _JUNK_STORE_DOMAINS:
+        if junk.endswith("."):
+            if junk in host:
+                return False
+        elif host == junk or host.endswith(f".{junk}"):
+            return False
+
+    path_lower = (parsed.path or "").lower()
+    if any(hint in path_lower for hint in _COLLECTION_URL_HINTS):
         return False
 
     verticals = [str(v).upper() for v in (creative.get("verticals") or [])]
@@ -342,66 +424,117 @@ async def discover_winning_ads(
     *,
     country: str = "UA",
     query: str = "",
-    min_days: int = 3,
-    lookback_days: int = 120,
+    min_days: int = MIN_DURATION_DAYS,
+    max_age_days: int = MAX_AD_AGE_DAYS,
+    lookback_days: Optional[int] = None,
     languages: Optional[list[str]] = None,
     ctas: Optional[list[str]] = None,
     page_size: int = 60,
     client: Optional[httpx.AsyncClient] = None,
     proxy: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Stage 1: Discover active recent e-commerce/COD ad winners from Tyver.io and deduplicate by landing."""
-    since_date = (date.today() - timedelta(days=max(7, lookback_days))).isoformat()
+    """Stage 1: Discover active 3-14d e-commerce/COD ad winners from Tyver.io and deduplicate by landing."""
+    age_cap = max(min_days, int(lookback_days if lookback_days is not None else max_age_days))
+    since_date = (date.today() - timedelta(days=age_cap)).isoformat()
     target_country = (country or "UA").strip().upper()
     clean_q = (query or "").strip()
-    langs = languages if languages is not None else (["uk"] if target_country == "UA" and not clean_q else [])
-    cta_list = ctas if ctas is not None else ["Shop Now", "Order Now", "Buy Now"]
+    langs = languages if languages is not None else (["uk"] if target_country == "UA" else [])
+    cta_list = ctas if ctas is not None else list(DROPSHIP_CTAS)
 
-    res = await fetch_tyver_creatives(
-        api_key=api_key,
-        mode="ecom_ua",
-        query=clean_q,
-        countries=[target_country],
-        activity_days_amount_gte=max(1, min_days),
-        creation_date_gte=since_date,
-        languages=langs,
-        cta=cta_list,
-        sort="activity_days_amount",
-        page_size=page_size,
-        client=client,
-        proxy=proxy,
-    )
-    if not res.get("ok"):
-        return res
+    search_queries: list[str]
+    if clean_q:
+        search_queries = [clean_q]
+    elif target_country == "UA":
+        # Auto-discover diverse COD landers across proven UA cash-on-delivery queries + general CTA scan.
+        search_queries = ["", *COD_DISCOVERY_SIGNALS]
+    else:
+        search_queries = [""]
 
-    raw_items = res.get("items") or []
+    tasks = [
+        fetch_tyver_creatives(
+            api_key=api_key,
+            mode="ecom_ua",
+            query=sq,
+            countries=[target_country],
+            activity_days_amount_gte=max(1, min_days),
+            activity_days_amount_lte=age_cap,
+            creation_date_gte=since_date,
+            languages=langs,
+            cta=cta_list,
+            sort="activity_days_amount",
+            page_size=page_size,
+            client=client,
+            proxy=proxy,
+        )
+        for sq in search_queries
+    ]
+    responses = await asyncio.gather(*tasks)
+    ok_responses = [r for r in responses if r.get("ok")]
+    if not ok_responses:
+        return responses[0]
+
+    seen_creative_ids: set[str] = set()
+    raw_items: list[dict[str, Any]] = []
+    api_total = 0
+    for resp in ok_responses:
+        api_total = max(api_total, int(resp.get("total") or 0))
+        for item in resp.get("items") or []:
+            cid = str(item.get("id") or "")
+            if cid and cid in seen_creative_ids:
+                continue
+            if cid:
+                seen_creative_ids.add(cid)
+            raw_items.append(item)
+
     grouped: dict[str, dict[str, Any]] = {}
     for item in raw_items:
         if not is_ecom_store_candidate(item):
             continue
+        if not within_ad_age_window(item, min_days=max(1, min_days), max_age_days=age_cap):
+            continue
         key = _normalize_store_key(item["landing_url"])
+        item_days = max(0, int(item.get("activity_days") or 0))
+        item_impr = int(item.get("impressions") or 0) if isinstance(item.get("impressions"), (int, float)) else 0
         existing = grouped.get(key)
         if existing is None:
             copy = dict(item)
             copy["duplicate_count"] = 1
             copy["creative_ids"] = [item["id"]] if item.get("id") else []
+            copy["cumulative_days"] = item_days
+            copy["_total_impressions"] = item_impr
             grouped[key] = copy
         else:
             existing["duplicate_count"] += 1
+            existing["cumulative_days"] += item_days
+            existing["_total_impressions"] += item_impr
             if item.get("id") and item["id"] not in existing["creative_ids"]:
                 existing["creative_ids"].append(item["id"])
-            if int(item.get("activity_days") or 0) > int(existing.get("activity_days") or 0):
-                existing["activity_days"] = item["activity_days"]
+            if item_days > int(existing.get("activity_days") or 0):
+                existing["activity_days"] = item_days
+            if not existing.get("thumbnail_url") and item.get("thumbnail_url"):
+                existing["thumbnail_url"] = item["thumbnail_url"]
+                existing["image_url"] = item.get("image_url") or item["thumbnail_url"]
 
-    deduped = list(grouped.values())
+    deduped: list[dict[str, Any]] = []
+    for entry in grouped.values():
+        impr = entry.pop("_total_impressions", 0)
+        est_spend, spend_basis = estimate_ad_spend_usd(entry.get("cumulative_days") or 0, impr)
+        entry["est_spend_usd"] = est_spend
+        entry["spend_basis"] = spend_basis
+        deduped.append(entry)
+
     deduped.sort(
-        key=lambda x: (int(x.get("duplicate_count") or 1), int(x.get("activity_days") or 0)),
+        key=lambda x: (
+            int(x.get("duplicate_count") or 1),
+            float(x.get("est_spend_usd") or 0.0),
+            int(x.get("activity_days") or 0),
+        ),
         reverse=True,
     )
     return {
         "ok": True,
         "mode": "ecom_ua",
-        "total": res.get("total", len(deduped)),
+        "total": api_total or len(deduped),
         "raw_count": len(raw_items),
         "items": deduped,
         "error": None,
@@ -414,13 +547,15 @@ async def validate_cross_advertiser_demand(
     *,
     country: str = "UA",
     min_ad_sets: int = 5,
-    min_days: int = 3,
+    min_days: int = MIN_DURATION_DAYS,
+    max_age_days: int = MAX_AD_AGE_DAYS,
+    min_spend_usd: float = MIN_EST_SPEND_USD,
     client: Optional[httpx.AsyncClient] = None,
     proxy: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Stage 3: Query Tyver Pass #2 for core_phrase across advertisers to validate cumulative ad spend."""
+    """Stage 3: Query Tyver Pass #2 for core_phrase across advertisers within 3-14d to validate ad spend."""
     clean_phrase = (core_phrase or "").strip()
-    if len(clean_phrase) < 2 or not (api_key or "").strip():
+    if not is_valid_core_phrase(clean_phrase, min_tokens=2) or not (api_key or "").strip():
         return {
             "ok": False,
             "core_phrase": clean_phrase,
@@ -428,16 +563,23 @@ async def validate_cross_advertiser_demand(
             "total_matching_ads": 0,
             "cumulative_active_days": 0,
             "total_impressions": 0,
+            "est_spend_usd": 0.0,
+            "spend_basis": "none",
             "meets_ad_sets_threshold": False,
+            "meets_spend_threshold": False,
             "competitor_ads": [],
+            "error": "core_phrase requires at least 2 meaningful tokens" if (api_key or "").strip() else "TYVER_API_KEY missing",
         }
 
+    since_date = (date.today() - timedelta(days=max(min_days, max_age_days))).isoformat()
     res = await fetch_tyver_creatives(
         api_key=api_key,
         mode="ecom_ua",
         query=clean_phrase,
         countries=[(country or "UA").strip().upper()],
         activity_days_amount_gte=max(1, min_days),
+        activity_days_amount_lte=max(min_days, max_age_days),
+        creation_date_gte=since_date,
         sort="activity_days_amount",
         page_size=60,
         client=client,
@@ -451,7 +593,10 @@ async def validate_cross_advertiser_demand(
             "total_matching_ads": 0,
             "cumulative_active_days": 0,
             "total_impressions": 0,
+            "est_spend_usd": 0.0,
+            "spend_basis": "none",
             "meets_ad_sets_threshold": False,
+            "meets_spend_threshold": False,
             "competitor_ads": [],
             "error": res.get("error"),
         }
@@ -465,9 +610,11 @@ async def validate_cross_advertiser_demand(
     for item in res.get("items") or []:
         if not is_ecom_store_candidate(item):
             continue
+        if not within_ad_age_window(item, min_days=max(1, min_days), max_age_days=max(min_days, max_age_days)):
+            continue
         blob_tokens = normalize_product_tokens(f"{item.get('title') or ''} {item.get('text') or ''}")
         recall, _ = _token_overlap_score(ref_tokens, blob_tokens)
-        if ref_tokens and recall < 0.34:
+        if ref_tokens and recall < 0.60:
             continue
         matched.append(item)
         adv_key = str(item.get("page_name") or item.get("target_domain") or item.get("id") or "").strip().lower()
@@ -477,6 +624,7 @@ async def validate_cross_advertiser_demand(
         if isinstance(item.get("impressions"), (int, float)):
             total_impr += int(item["impressions"])
 
+    est_spend, spend_basis = estimate_ad_spend_usd(cum_days, total_impr)
     total_ads = max(len(matched), int(res.get("total") or len(matched)) if matched else 0)
     compact_proofs = [
         {
@@ -498,6 +646,9 @@ async def validate_cross_advertiser_demand(
         "api_total_hits": total_ads,
         "cumulative_active_days": cum_days,
         "total_impressions": total_impr,
+        "est_spend_usd": est_spend,
+        "spend_basis": spend_basis,
         "meets_ad_sets_threshold": len(matched) >= min_ad_sets,
+        "meets_spend_threshold": est_spend >= min_spend_usd,
         "competitor_ads": compact_proofs,
     }

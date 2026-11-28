@@ -38,6 +38,12 @@
           "title": "Active Ad Sets",
           "type": "integer"
         },
+        "est_spend_usd": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Est Spend Usd",
+          "type": "number"
+        },
         "countries": {
           "items": {
             "type": "string"
@@ -227,6 +233,18 @@
           "default": null,
           "title": "Image Url"
         },
+        "fallback_image_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Image Url"
+        },
         "platform": {
           "default": "Custom PHP",
           "title": "Platform",
@@ -241,6 +259,30 @@
           "default": "",
           "title": "Model Code",
           "type": "string"
+        },
+        "is_cod_lander": {
+          "default": false,
+          "title": "Is Cod Lander",
+          "type": "boolean"
+        },
+        "cod_score": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Cod Score",
+          "type": "integer"
+        },
+        "cod_signals": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cod Signals",
+          "type": "array"
+        },
+        "is_generic_catalog": {
+          "default": false,
+          "title": "Is Generic Catalog",
+          "type": "boolean"
         }
       },
       "required": [
@@ -690,6 +732,17 @@
       "minimum": 0,
       "title": "Cumulative Active Days",
       "type": "integer"
+    },
+    "est_spend_usd": {
+      "default": 0.0,
+      "minimum": 0,
+      "title": "Est Spend Usd",
+      "type": "number"
+    },
+    "spend_basis": {
+      "default": "",
+      "title": "Spend Basis",
+      "type": "string"
     },
     "competitor_ads": {
       "items": {

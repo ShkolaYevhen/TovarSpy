@@ -13,6 +13,10 @@ _STOPWORDS: set[str] = {
     "купити", "купить", "замовити", "заказать", "ціна", "цена", "грн", "uah", "шт", "оплата", "отриманні",
     "доставка", "нова", "пошта", "безкоштовна", "сьогодні", "тільки", "оригінал", "оригинал", "якість",
     "опт", "оптом", "дроп", "дропшипінг", "дропшиппинг", "роздріб", "розница", "ррц", "в", "наявності",
+    "бестселери", "бестселлеры", "каталог", "акційні", "акционные", "товари", "товары",
+    "новинки", "магазин", "головна", "главная", "категорії", "категории", "всі",
+    "collections", "collection", "catalog", "category", "bestsellers", "shop", "store",
+    "comfy", "rozetka", "prom", "olx",
     "the", "and", "for", "with", "pro", "new", "sale", "hot", "best", "promo", "buy", "now", "free", "shipping",
 }
 
@@ -96,6 +100,11 @@ def extract_core_phrase(text: str, max_words: int = 4) -> str:
                 selected.append(m)
             break
     return " ".join(selected[:max_words])
+
+
+def is_valid_core_phrase(core_phrase: str, min_tokens: int = 2) -> bool:
+    """Return True if core_phrase carries at least `min_tokens` meaningful non-catalog words."""
+    return len(normalize_product_tokens(core_phrase or "")) >= min_tokens
 
 
 def compute_dhash(image_bytes: bytes) -> Optional[int]:

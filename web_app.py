@@ -98,7 +98,9 @@ class ScanRequest(BaseModel):
     send_alerts: bool = False
     proxy_url: Optional[str] = None
     min_duration_days: Optional[int] = Field(default=None, ge=0)
+    max_ad_age_days: Optional[int] = Field(default=None, ge=1)
     min_active_ad_sets: Optional[int] = Field(default=None, ge=1)
+    min_est_spend_usd: Optional[float] = Field(default=None, ge=0)
     shipping_cost_est_usd: Optional[float] = Field(default=None, ge=0)
     est_cpa_usd: Optional[float] = Field(default=None, ge=0)
     winner_net_margin_usd: Optional[float] = None
@@ -255,7 +257,8 @@ def _serialize_product(p: AnalyzedProductReport, settings: Optional[Settings] = 
     prom_sig = next((s for s in p.marketplace_signals if s.platform == "prom_ua" and s.top_sample_url), None)
     olx_sig = next((s for s in p.marketplace_signals if s.platform in ("olx_ua", "olx_pl") and s.top_sample_url), None)
 
-    image_url = p.landing.image_url or p.ad.ad_creative_image_url or (best.image_url if best else "") or ""
+    fallback_image_url = p.landing.fallback_image_url or p.ad.ad_creative_image_url or (best.image_url if best else None)
+    image_url = p.landing.image_url or fallback_image_url or ""
     product_url = p.landing.final_url or p.landing.url or p.ad.landing_url
     usd_to_uah = getattr(settings, "USD_TO_UAH", 41.67) if settings else 41.67
 
@@ -275,9 +278,15 @@ def _serialize_product(p: AnalyzedProductReport, settings: Optional[Settings] = 
 
     data.update({
         "image_url": image_url,
+        "fallback_image_url": fallback_image_url,
         "product_url": product_url,
         "core_phrase": p.landing.core_phrase,
         "model_code": p.landing.model_code,
+        "is_cod_lander": bool(p.landing.is_cod_lander),
+        "cod_score": int(p.landing.cod_score or 0),
+        "cod_signals": list(p.landing.cod_signals or []),
+        "est_spend_usd": round(float(p.est_spend_usd or p.ad.est_spend_usd or 0.0), 2),
+        "spend_basis": p.spend_basis or "cumulative_days",
         "supplier_url": ua_ws_sup.product_url if ua_ws_sup else (best.product_url if best else None),
         "ali_url": None if (settings and settings.SKIP_CHINA_SOURCING) else (ali_sup.product_url if ali_sup else None),
         "prom_url": product_url if p.ad.source == "prom_ua" else (prom_sig.top_sample_url if prom_sig else None),
@@ -383,7 +392,9 @@ def create_app(
         return {
             "target_countries": s.TARGET_COUNTRIES,
             "min_duration_days": s.MIN_DURATION_DAYS,
+            "max_ad_age_days": s.MAX_AD_AGE_DAYS,
             "min_active_ad_sets": s.MIN_ACTIVE_AD_SETS,
+            "min_est_spend_usd": s.MIN_EST_SPEND_USD,
             "shipping_cost_est_usd": s.SHIPPING_COST_EST_USD,
             "est_cpa_usd": s.EST_CPA_USD,
             "winner_net_margin_usd": s.WINNER_NET_MARGIN_USD,
@@ -552,8 +563,12 @@ def create_app(
         scan_settings = state.settings.model_copy(deep=True)
         if req.min_duration_days is not None:
             scan_settings.MIN_DURATION_DAYS = req.min_duration_days
+        if req.max_ad_age_days is not None:
+            scan_settings.MAX_AD_AGE_DAYS = req.max_ad_age_days
         if req.min_active_ad_sets is not None:
             scan_settings.MIN_ACTIVE_AD_SETS = req.min_active_ad_sets
+        if req.min_est_spend_usd is not None:
+            scan_settings.MIN_EST_SPEND_USD = req.min_est_spend_usd
         if req.shipping_cost_est_usd is not None:
             scan_settings.SHIPPING_COST_EST_USD = req.shipping_cost_est_usd
         if req.est_cpa_usd is not None:

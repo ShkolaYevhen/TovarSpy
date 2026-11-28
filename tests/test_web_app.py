@@ -53,8 +53,15 @@ class TestWebApp(unittest.TestCase):
             "5-Stage Ad-First",
             "Tyver Ad Spy",
             "No verified wholesale match yet",
+            "toggleTrendsBtn",
+            "handleImgFallback",
+            "COD Lander",
+            "thMaxAge",
+            "thMinSpend",
         ):
             self.assertIn(marker, resp_page.text)
+        self.assertIn('id="trendsRow" style="display:none;', resp_page.text)
+        self.assertNotIn("loadTrendsForGeo();\n      loadTyverQuota", resp_page.text)
 
         resp_root_page = self.client.get("/")
         self.assertEqual(resp_root_page.status_code, 200)
@@ -66,6 +73,8 @@ class TestWebApp(unittest.TestCase):
         cfg = cfg_resp.json()
         self.assertEqual(cfg["target_countries"], ["UA", "PL", "RO", "CZ", "DE", "US"])
         self.assertEqual(cfg["min_duration_days"], 3)
+        self.assertEqual(cfg["max_ad_age_days"], 14)
+        self.assertAlmostEqual(cfg["min_est_spend_usd"], 100.0)
         self.assertIn("prom_wholesale", cfg["available_sources"])
         self.assertIn("tyver", cfg["available_sources"])
         self.assertTrue(cfg["skip_china_sourcing"])
@@ -78,6 +87,13 @@ class TestWebApp(unittest.TestCase):
         self.assertIn("summary", report)
         self.assertIn("products", report)
         self.assertEqual(report["summary"]["total"], 0)
+
+    def test_serialized_product_exposes_spend_cod_and_fallback_fields(self) -> None:
+        scan_resp = self.client.post("/spy/api/scan", json={"query": "massager", "mock": True})
+        self.assertEqual(scan_resp.status_code, 200)
+        prod = scan_resp.json()["products"][0]
+        for key in ("est_spend_usd", "spend_basis", "is_cod_lander", "cod_score", "cod_signals", "fallback_image_url"):
+            self.assertIn(key, prod)
 
     def test_scan_history_simulator_watchlist_and_tg_channels(self) -> None:
         scan_resp = self.client.post(

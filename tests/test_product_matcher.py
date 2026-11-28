@@ -9,6 +9,7 @@ from product_matcher import (
     evaluate_product_match,
     extract_core_phrase,
     extract_model_tokens,
+    is_valid_core_phrase,
 )
 
 
@@ -106,6 +107,12 @@ class TestProductMatcher(unittest.TestCase):
         )
         self.assertFalse(vis_reject.is_match)
         self.assertEqual(vis_reject.label, "Rejected: Visual Mismatch")
+
+    def test_generic_catalog_stopwords_and_min_two_tokens(self) -> None:
+        self.assertEqual(extract_core_phrase("Бестселери Каталог Акційні товари"), "")
+        self.assertFalse(is_valid_core_phrase("Бестселери Каталог"))
+        self.assertFalse(is_valid_core_phrase("масажер"))
+        self.assertTrue(is_valid_core_phrase("масажер перкусійний"))
 
 
 if __name__ == "__main__":
