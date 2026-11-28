@@ -73,17 +73,45 @@ _GENERIC_CATALOG_TITLES: frozenset[str] = frozenset({
     "shop",
     "all products",
 })
-_CATALOG_PATH_RE = re.compile(r"/(?:collections?|catalog(?:ue)?|categor(?:y|ies)|sale|novinki|bestsellers?)(?:/|$)", re.I)
+_CATALOG_PATH_RE = re.compile(
+    r"/(?:collections?|catalog(?:ue)?|categor(?:y|ies)|filters?|sale|novinki|bestsellers?|courses?|webinar|afisha)(?:/|$)",
+    re.I,
+)
+_FILTER_PATH_RE = re.compile(r"/(?:filters?)(?:/|$)", re.I)
 _SINGLE_PRODUCT_PATH_RE = re.compile(r"/(?:p|product|item|offer)/\d+", re.I)
+_SOFT_404_TITLE_RE = re.compile(
+    r"(?:сторінк[ау]\s+не\s+знайдено|страница\s+не\s+найдена|товар\s+не\s+знайдено|page\s+not\s+found|\b404\b)",
+    re.I,
+)
+_SOFT_404_BODY_RE = re.compile(
+    r"(?:сторінк[ау]\s+не\s+знайдено|страница\s+не\s+найдена|товар\s+не\s+знайдено|page\s+not\s+found|\b(?:помилка|ошибка|error)\s*404\b)",
+    re.I,
+)
+_COURSE_INFOPRODUCT_RE = re.compile(
+    r"(?:\bкурс[иів]*\b|\bвебінар|\bнавчання\b|з\s+нуля\s+за|\bмодул[ьяі]\b|\bурок[іів]*\b|\bінтенсив|\bтариф[иі]?\b|\bспікер|\bментор|\bквитки\b|\bафіша\b|онлайн-курс)",
+    re.I,
+)
 _UA_COD_MARKERS: tuple[str, ...] = (
     "нова пошта",
     "оплата при отриманні",
+    "оплата після отримання",
     "оплата при получении",
     "післяплата",
     "накладений платіж",
     "відправка сьогодні",
+    "відправка в день замовлення",
+    "без передоплати",
+    "швидке замовлення",
     "замовити зі знижкою",
     "до кінця акції",
+)
+_COD_SUBMIT_CUES: tuple[str, ...] = (
+    "замовити",
+    "оформити замовлення",
+    "купити зараз",
+    "залишити заявку",
+    "отримати зі знижкою",
+    "заказать",
 )
 _TITLE_PRICE_SUFFIX_RE = re.compile(
     r"\s*(?:\||—|–|-)\s*(?:\d[\d\s\u00a0]*(?:[.,]\d{1,2})?\s*(?:₴|грн\.?|UAH|\$|€|zł)|купити.*|купить.*|офіційний сайт.*)\s*$",
@@ -215,15 +243,15 @@ def _extract_from_json_ld(soup: BeautifulSoup) -> tuple[Optional[float], Optiona
 
 
 def _is_valid_dom_price(price: Optional[float], currency: Optional[str]) -> bool:
-    """Reject 0/micro-prices such as 9 UAH discounts or tiny shipping fees."""
+    """Reject 0/micro-prices such as shipping fees (e.g. 60-70 UAH) or discount percentages."""
     if price is None or price <= 0:
         return False
     code = (currency or "UAH").strip().upper()
     if code == "UAH":
-        return price >= 50.0
+        return price >= 100.0
     if code == "PLN":
-        return price >= 10.0
-    return price >= 2.0
+        return price >= 15.0
+    return price >= 3.0
 
 
 def _extract_price_and_currency(soup: BeautifulSoup) -> tuple[Optional[float], Optional[str]]:
@@ -318,6 +346,9 @@ def _extract_title(soup: BeautifulSoup) -> Optional[str]:
             candidates.append(t)
 
     for cand in candidates:
+        if not _is_generic_catalog_title(cand) and is_valid_core_phrase(extract_core_phrase(cand, max_words=4), min_tokens=2):
+            return cand
+    for cand in candidates:
         if not _is_generic_catalog_title(cand):
             return cand
     return candidates[0] if candidates else None
@@ -355,7 +386,16 @@ def _extract_image_url(
 
     for selector in ("img.product-image", ".product-slider img", ".gallery img", "main img", "img"):
         for img in soup.select(selector):
-            raw_src = img.get("src") or img.get("data-src") or img.get("data-original")
+            raw_src = (
+                img.get("src")
+                or img.get("data-src")
+                or img.get("data-original")
+                or img.get("data-lazy")
+                or img.get("data-bg")
+            )
+            if not raw_src and img.get("srcset"):
+                first_entry = str(img["srcset"]).split(",")[0].strip().split()
+                raw_src = first_entry[0] if first_entry else None
             if not raw_src:
                 continue
             resolved = urljoin(base_url, str(raw_src).strip())
@@ -378,14 +418,20 @@ def detect_cod_lander_dna(
     signals: list[str] = []
     score = 0
 
-    # 1. COD <form> containing both name and phone inputs
+    # 1. COD <form> containing phone/tel input paired with either a name input OR a COD submit CTA button
     has_cod_form = False
     for form in active_soup.find_all("form"):
         has_phone = False
         has_name = False
+        has_cod_submit = False
         for inp in form.find_all(["input", "textarea"]):
             inp_type = str(inp.get("type") or "").lower()
-            if inp_type in ("hidden", "submit", "button", "checkbox", "radio"):
+            if inp_type in ("submit", "button"):
+                btn_val = str(inp.get("value") or "").lower()
+                if any(cue in btn_val for cue in _COD_SUBMIT_CUES):
+                    has_cod_submit = True
+                continue
+            if inp_type in ("hidden", "checkbox", "radio"):
                 continue
             blob = " ".join(
                 str(inp.get(k) or "") for k in ("type", "name", "id", "placeholder", "aria-label")
@@ -394,7 +440,12 @@ def detect_cod_lander_dna(
                 has_phone = True
             if any(k in blob for k in ("name", "ім", "имя", "фіо", "фио", "pib", "client", "customer")):
                 has_name = True
-        if has_phone and has_name:
+        if not has_cod_submit:
+            for btn in form.find_all(["button", "a"]):
+                if any(cue in btn.get_text(" ", strip=True).lower() for cue in _COD_SUBMIT_CUES):
+                    has_cod_submit = True
+                    break
+        if has_phone and (has_name or has_cod_submit):
             has_cod_form = True
             break
     if has_cod_form:
@@ -419,30 +470,51 @@ def detect_cod_lander_dna(
     parsed = urlparse((url or "").strip())
     host = parsed.netloc.lower().split(":")[0].removeprefix("www.")
     path = parsed.path or ""
+    query_str = (parsed.query or "").lower()
     labels = [p for p in host.split(".") if p]
     is_subdomain_farm = (host.endswith(".com.ua") and len(labels) >= 4) or (not host.endswith(".com.ua") and len(labels) >= 3)
     has_dropship_tld = any(host.endswith(tld) for tld in DROPSHIP_DOMAIN_TLDS if tld != ".com.ua")
-    if _SINGLE_PRODUCT_PATH_RE.search(path) or is_subdomain_farm or has_dropship_tld:
+    is_single_url = bool(_SINGLE_PRODUCT_PATH_RE.search(path) or is_subdomain_farm or has_dropship_tld)
+    if is_single_url:
         signals.append("dropship_url_dna")
         score += 15
 
-    # Generic storefront/catalog detection
+    # Generic storefront/catalog, filter, soft-404, or course/infoproduct rejection
     extracted_title = title if title is not None else _extract_title(active_soup)
+    h1_text = " ".join(h.get_text(" ", strip=True) for h in active_soup.find_all("h1"))
+    title_blob = f"{extracted_title or ''} {h1_text}".strip()
+    is_soft_404 = bool(_SOFT_404_TITLE_RE.search(title_blob) or _SOFT_404_BODY_RE.search(body_text_lower[:1200]))
+    course_hits = _COURSE_INFOPRODUCT_RE.findall(f"{title_blob} {body_text_lower[:1800]}")
+    is_course = bool(_COURSE_INFOPRODUCT_RE.search(title_blob) or len(set(h.lower() for h in course_hits)) >= 2)
+
     catalog_card_count = len(active_soup.select(".product-card, .catalog-item, .product-grid-item, .products-grid > *"))
+    buy_buttons = [
+        b.get_text(" ", strip=True).lower()
+        for b in active_soup.find_all(["button", "a"])
+        if any(k in b.get_text(" ", strip=True).lower() for k in ("купити", "в кошик", "add to cart"))
+    ]
+    is_filter_url = bool(_FILTER_PATH_RE.search(path) or ("page=" in query_str and not _SINGLE_PRODUCT_PATH_RE.search(path)))
     is_catalog_url = bool(_CATALOG_PATH_RE.search(path))
     is_generic_title = _is_generic_catalog_title(extracted_title)
+    is_multi_product_grid = catalog_card_count >= 6 or len(buy_buttons) >= 6
+
     is_generic_catalog = bool(
-        is_generic_title
-        or (is_catalog_url and not has_cod_form)
-        or (catalog_card_count >= 6 and not has_cod_form)
+        is_soft_404
+        or is_course
+        or is_filter_url
+        or is_generic_title
+        or (is_catalog_url and not (has_cod_form and is_single_url))
+        or (is_multi_product_grid and not has_cod_form)
     )
 
-    is_cod_lander = bool((score >= 40 or has_cod_form) and not is_generic_catalog)
+    is_cod_lander = bool((has_cod_form or ("ua_cod_markers" in signals and score >= 40)) and not is_generic_catalog)
     return {
         "is_cod_lander": is_cod_lander,
-        "cod_score": min(100, score),
+        "cod_score": 0 if is_generic_catalog else min(100, score),
         "cod_signals": signals,
         "is_generic_catalog": is_generic_catalog,
+        "is_soft_404": is_soft_404,
+        "is_course": is_course,
     }
 
 
@@ -492,6 +564,7 @@ async def fetch_landing_page_fast(
     timeout_s: float = 10.0,
     browser: Any = None,
     fallback_image_url: Optional[str] = None,
+    allow_browser: bool = True,
 ) -> LandingPageData:
     """Try fast HTTPX fetch first, falling back to Playwright only when HTML lacks title/price."""
     headers = {
@@ -520,6 +593,14 @@ async def fetch_landing_page_fast(
 
     if parsed_fast is not None and parsed_fast.title and (parsed_fast.price or parsed_fast.image_url):
         return parsed_fast
+
+    if not allow_browser:
+        return parsed_fast or LandingPageData(
+            url=url,
+            final_url=url,
+            image_url=fallback_image_url if fallback_image_url and _is_usable_hero_img(fallback_image_url) else None,
+            platform="Custom PHP",
+        )
 
     try:
         pw_res = await fetch_landing_page(url, timeout_ms=int(timeout_s * 1000), browser=browser)

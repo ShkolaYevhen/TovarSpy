@@ -913,6 +913,8 @@
         const codScore = Number(item.cod_score ?? l.cod_score ?? 0);
         const codSignals = (item.cod_signals || l.cod_signals || []).join(', ');
         const matchTop = (item.suppliers && item.suppliers[0]?.match_score) ? `${Number(item.suppliers[0].match_score).toFixed(0)}% match` : '';
+        let storeHost = '';
+        try { const pu = new URL(prodUrl); storeHost = pu.host.replace(/^www\./, '') + (/^\/p\/\d+/.test(pu.pathname) ? pu.pathname.match(/^\/p\/\d+/)[0] : ''); } catch (_) {}
 
         return `
           <article class="product-card" data-ad-id="${esc(ad.ad_id)}">
@@ -935,7 +937,7 @@
             <div class="card-body">
               <div class="card-title" onclick="openDrawer('${esc(ad.ad_id)}')" title="${esc(l.title)}">${esc(l.title || 'Untitled Product')}</div>
               <div class="card-meta">
-                <span>${esc(ad.page_name)} · ∑ ${cumDays}d${estSpend > 0 ? ` · ~$${estSpend.toFixed(0)} spend` : ''}</span>
+                <span>${esc(storeHost || ad.page_name)} · ∑ ${cumDays}d${estSpend > 0 ? ` · ~$${estSpend.toFixed(0)} spend` : ''}</span>
                 <span class="mono">${hasWs ? `Опт <b>${wsUah.toFixed(0)}₴</b> → ` : ''}Retail <b>${retUah != null ? retUah.toFixed(0) + '₴' : '—'}</b></span>
               </div>
               ${hasWs ? `
@@ -1247,7 +1249,7 @@
       btn.disabled = true;
       btn.textContent = superMode ? 'Super Parsing Live Sources...' : 'Searching Live...';
       if (!(state.report?.products || []).length) {
-        $('galleryContainer').innerHTML = '<div class="loading-box" style="grid-column:1/-1;">Fetching live products, photos &amp; prices from AliExpress, Prom.ua, OLX &amp; Google Trends...</div>';
+        $('galleryContainer').innerHTML = '<div class="loading-box" style="grid-column:1/-1;">Scanning active 3–14d UA COD ads, landing DNA, Hotline/Prom &amp; real UA wholesale...</div>';
       }
       try {
         const endpoint = superMode ? '/api/super-parse' : '/api/scan';

@@ -13,11 +13,13 @@ _STOPWORDS: set[str] = {
     "купити", "купить", "замовити", "заказать", "ціна", "цена", "грн", "uah", "шт", "оплата", "отриманні",
     "доставка", "нова", "пошта", "безкоштовна", "сьогодні", "тільки", "оригінал", "оригинал", "якість",
     "опт", "оптом", "дроп", "дропшипінг", "дропшиппинг", "роздріб", "розница", "ррц", "в", "наявності",
+    "прямо", "зараз", "сегодня", "сьогодні", "тільки", "подарунок",
     "бестселери", "бестселлеры", "каталог", "акційні", "акционные", "товари", "товары",
     "новинки", "магазин", "головна", "главная", "категорії", "категории", "всі",
     "collections", "collection", "catalog", "category", "bestsellers", "shop", "store",
     "comfy", "rozetka", "prom", "olx",
     "the", "and", "for", "with", "pro", "new", "sale", "hot", "best", "promo", "buy", "now", "free", "shipping",
+    "of", "in", "on", "at", "to",
 }
 
 ACCESSORY_TRAP_WORDS: set[str] = {
@@ -105,6 +107,38 @@ def extract_core_phrase(text: str, max_words: int = 4) -> str:
 def is_valid_core_phrase(core_phrase: str, min_tokens: int = 2) -> bool:
     """Return True if core_phrase carries at least `min_tokens` meaningful non-catalog words."""
     return len(normalize_product_tokens(core_phrase or "")) >= min_tokens
+
+
+def build_stage3_search_phrases(core_phrase: str) -> list[str]:
+    """Return primary core_phrase plus a compact 2-word noun fallback for cross-advertiser search."""
+    clean = (core_phrase or "").strip()
+    tokens = normalize_product_tokens(clean)
+    if len(tokens) < 2:
+        return []
+    phrases = [clean]
+    short = " ".join(tokens[:2])
+    if short != clean:
+        phrases.append(short)
+    return phrases
+
+
+def evaluate_ad_to_lander_match(ad_text: str, landing: object) -> tuple[bool, str]:
+    """Allow story-hook creatives to match proven single-product COD landers while rejecting non-COD/junk."""
+    is_generic = bool(getattr(landing, "is_generic_catalog", False))
+    if is_generic:
+        return False, "rejected_generic_catalog"
+    is_cod = bool(getattr(landing, "is_cod_lander", False))
+    cod_score = int(getattr(landing, "cod_score", 0) or 0)
+    price = getattr(landing, "price", None)
+    if not is_cod or price is None or float(price) <= 0:
+        return False, "rejected_non_cod_or_no_price"
+    if cod_score >= 45 or is_cod:
+        # Story/hook ad copy often has 0 word overlap with the landing <h1> (e.g. zario.space, goodstorre.shop)
+        return True, "matched_cod_lander"
+    ref_tokens = normalize_product_tokens(getattr(landing, "title", "") or getattr(landing, "core_phrase", "") or "")
+    ad_tokens = normalize_product_tokens(ad_text or "")
+    recall, _ = _token_overlap_score(ref_tokens, ad_tokens)
+    return (recall >= 0.40), ("matched_lexical" if recall >= 0.40 else "rejected_low_overlap")
 
 
 def compute_dhash(image_bytes: bytes) -> Optional[int]:

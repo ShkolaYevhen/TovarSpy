@@ -208,11 +208,11 @@ class TestImgProxyAndSuperParse(unittest.IsolatedAsyncioTestCase):
                         return httpx.Response(200, json={"detail": "Success", "data": {"items": items, "total": 7}})
                 return httpx.Response(200, json={"detail": "Success", "data": {"items": stage1_ads, "total": 3}})
             if "blendshop.com.ua" in host:
-                return httpx.Response(200, text="<html><head><meta property='og:title' content='Портативний блендер USB MiniJuice'/><meta property='product:price:amount' content='990'/><meta property='product:price:currency' content='UAH'/></head></html>")
+                return httpx.Response(200, text="<html><head><meta property='og:title' content='Портативний блендер USB MiniJuice'/><meta property='product:price:amount' content='990'/><meta property='product:price:currency' content='UAH'/></head><body><img src='/blender.jpg'/><p>Нова Пошта оплата при отриманні</p><form><input name='name'/><input name='phone'/></form></body></html>")
             if "astroua.com.ua" in host:
-                return httpx.Response(200, text="<html><head><meta property='og:title' content='Телескоп Celestron Pro'/><meta property='product:price:amount' content='4200'/><meta property='product:price:currency' content='UAH'/></head></html>")
+                return httpx.Response(200, text="<html><head><meta property='og:title' content='Телескоп Celestron Pro'/><meta property='product:price:amount' content='4200'/><meta property='product:price:currency' content='UAH'/></head><body><img src='/astro.jpg'/><p>Оплата при отриманні</p><form><input name='name'/><input name='phone'/></form></body></html>")
             if "soloshop.com.ua" in host:
-                return httpx.Response(200, text="<html><head><meta property='og:title' content='Рідкісний товар Одиночка'/><meta property='product:price:amount' content='650'/><meta property='product:price:currency' content='UAH'/></head></html>")
+                return httpx.Response(200, text="<html><head><meta property='og:title' content='Рідкісний товар Одиночка'/><meta property='product:price:amount' content='650'/><meta property='product:price:currency' content='UAH'/></head><body><img src='/solo.jpg'/><form><input name='name'/><input name='phone'/></form></body></html>")
             if "hotline.ua" in host:
                 return httpx.Response(200, text='<div class="list-item"><a href="/ua/blender/">Портативний блендер USB MiniJuice</a><span>890 – 1 190 ₴</span></div>')
             if "prom.ua" in host:
@@ -349,6 +349,102 @@ class TestImgProxyAndSuperParse(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(back_report.landing.is_cod_lander)
         self.assertGreaterEqual(back_report.est_spend_usd, 100.0)
         self.assertEqual(res["trending_keywords"], [])
+
+    async def test_5stage_preserves_subdomains_and_product_paths_drops_non_cod_and_story_mismatch(self) -> None:
+        settings_tyv = Settings(
+            _env_file=None,
+            DB_PATH=str(Path(self.tmp_dir.name) / "cod_sub.db"),
+            TYVER_API_KEY="tyv_test_subdomains",
+            MIN_DURATION_DAYS=3,
+            MAX_AD_AGE_DAYS=14,
+            MIN_ACTIVE_AD_SETS=5,
+            MIN_EST_SPEND_USD=100.0,
+            SKIP_CHINA_SOURCING=True,
+        )
+        # Share root domain domely.com.ua & testishop.shop across distinct products + include non-COD & phone-404 safety check
+        stage1_ads = [
+            {
+                "provider_id": "dom-1",
+                "activity_days_amount": 6,
+                "bodies": ["Мій чоловік не міг повірити в ефект! Замовляйте сьогодні"],
+                "link_titles": ["Історія для дому"],
+                "countries": ["UA"],
+                "provider_page_name": "DomelyPage1",
+                "target_url": "https://massgun.domely.com.ua/",
+                "cta": "Shop now",
+                "media": [{"content_type": "image/jpeg", "compressed_image_url": "https://cdn.b2.test/massgun.jpg"}],
+            },
+            {
+                "provider_id": "dom-2",
+                "activity_days_amount": 7,
+                "bodies": ["Зима вже близько — тепло в домі"],
+                "link_titles": ["Зимовий хіт"],
+                "countries": ["UA"],
+                "provider_page_name": "DomelyPage2",
+                "target_url": "https://obihrivach.2v1.domely.com.ua/",
+                "cta": "Shop now",
+                "media": [{"content_type": "image/jpeg", "compressed_image_url": "https://cdn.b2.test/obihriv.jpg"}],
+            },
+            {
+                "provider_id": "testi-179",
+                "activity_days_amount": 5,
+                "bodies": ["Спина та шия скажуть дякую"],
+                "link_titles": ["Здоров'я"],
+                "countries": ["UA"],
+                "provider_page_name": "TestiShop",
+                "target_url": "https://testishop.shop/p/0179?fbclid=abc",
+                "cta": "Shop now",
+            },
+            {
+                "provider_id": "noncod-1",
+                "activity_days_amount": 10,
+                "bodies": ["Купити онлайн передплата картою"],
+                "link_titles": ["Купити онлайн"],
+                "countries": ["UA"],
+                "provider_page_name": "PrepayStore",
+                "target_url": "https://prepay.shop/item",
+            },
+        ]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            host = request.url.host
+            search_q = (request.url.params.get("search") or "").lower()
+            in_link = (request.url.params.get("in_link") or "").lower()
+            if "api.tyver.io" in host:
+                if in_link == "massgun.domely.com.ua":
+                    return httpx.Response(200, json={"detail": "Success", "data": {"items": [{**stage1_ads[0], "provider_id": f"mg-{i}", "activity_days_amount": 4} for i in range(5)], "total": 5}})
+                if in_link == "obihrivach.2v1.domely.com.ua":
+                    return httpx.Response(200, json={"detail": "Success", "data": {"items": [{**stage1_ads[1], "provider_id": f"ob-{i}", "activity_days_amount": 5} for i in range(5)], "total": 5}})
+                if in_link == "testishop.shop/p/0179":
+                    return httpx.Response(200, json={"detail": "Success", "data": {"items": [{**stage1_ads[2], "provider_id": f"ts-{i}", "activity_days_amount": 5} for i in range(5)], "total": 5}})
+                if "перкус" in search_q or "обігрівач" in search_q or "роликов" in search_q:
+                    return httpx.Response(200, json={"detail": "Success", "data": {"items": [], "total": 0}})
+                return httpx.Response(200, json={"detail": "Success", "data": {"items": stage1_ads, "total": 4}})
+            if host == "massgun.domely.com.ua":
+                return httpx.Response(200, text="<html><head><title>Перкусійний масажер тіла</title></head><body><p>Тел: 097 404 12 34. Оплата при отриманні</p><del>999 грн</del><span class='price'>499 грн</span><form><input name='name'/><input name='phone'/></form><img data-lazy='/images/gun.webp'/></body></html>")
+            if host == "obihrivach.2v1.domely.com.ua":
+                return httpx.Response(200, text="<html><head><title>Газовий обігрівач плита 2в1</title></head><body><p>Оплата після отримання</p><span class='price'>1499 грн</span><form><input type='tel' name='phone'/><button>Замовити</button></form><img src='/images/stove.webp'/></body></html>")
+            if host == "testishop.shop":
+                return httpx.Response(200, text="<html><head><title>Роликовий масажер шиї Beig</title></head><body><p>Нова Пошта оплата при отриманні</p><span class='price'>899 грн</span><form><input name='name'/><input name='phone'/></form><img src='/api/quick-tests/images/0179'/></body></html>")
+            if host == "prepay.shop":
+                return httpx.Response(200, text="<html><head><title>Металевий чайник електричний</title></head><body><p>Тільки онлайн оплата карткою</p><span class='price'>1100 грн</span></body></html>")
+            return httpx.Response(200, text="")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock_http:
+            res = await run_super_parse(
+                output_dir=self.tmp_dir.name,
+                settings=settings_tyv,
+                client=mock_http,
+            )
+
+        urls = [r.ad.landing_url for r in res["reports"]]
+        self.assertEqual(len(res["reports"]), 3)
+        self.assertIn("https://massgun.domely.com.ua/", urls)
+        self.assertIn("https://obihrivach.2v1.domely.com.ua/", urls)
+        self.assertIn("https://testishop.shop/p/0179?fbclid=abc", urls)
+        self.assertTrue(all(r.landing.is_cod_lander for r in res["reports"]))
+        self.assertTrue(all(r.landing.price and r.landing.price >= 499 for r in res["reports"]))
+        self.assertEqual(res["reports"][0].landing.image_url or "", res["reports"][0].landing.image_url or "")
 
 
 if __name__ == "__main__":

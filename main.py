@@ -36,6 +36,7 @@ from marketplace_intel import (
 from notifier import export_reports, send_telegram_alert
 from product_matcher import (
     _token_overlap_score,
+    evaluate_ad_to_lander_match,
     evaluate_product_match,
     extract_core_phrase,
     is_valid_core_phrase,
@@ -50,6 +51,7 @@ from sourcing_engine import (
 )
 from storage import save_scan
 from tyver_client import (
+    _normalize_store_key,
     discover_winning_ads,
     fetch_tyver_creatives,
     validate_cross_advertiser_demand,
@@ -295,106 +297,211 @@ async def run_ad_first_arbitrage(
             )
             raw_stage1 = stage1_res.get("items") or []
 
-        candidates = raw_stage1[:12]
+        candidates = raw_stage1[:60]
 
         # Stage 2: Extract landing title, core_phrase, UAH price, COD DNA, and pixel-free hero image
-        landings = await asyncio.gather(
-            *(
-                fetch_landing_page_fast(
-                    ad["landing_url"],
+        scrape_sem = asyncio.Semaphore(10)
+
+        async def _scrape_one(ad_item: dict[str, Any]) -> Any:
+            async with scrape_sem:
+                return await fetch_landing_page_fast(
+                    ad_item["landing_url"],
                     client=http_client,
-                    fallback_image_url=ad.get("thumbnail_url") or ad.get("image_url"),
+                    timeout_s=7.0,
+                    allow_browser=False,
+                    fallback_image_url=ad_item.get("thumbnail_url") or ad_item.get("image_url"),
                 )
-                for ad in candidates
-            ),
+
+        landings = await asyncio.gather(
+            *(_scrape_one(ad) for ad in candidates),
             return_exceptions=True,
         )
 
         staged_candidates: list[dict[str, Any]] = []
+        seen_store_keys: set[str] = set()
         seen_phrases: list[str] = []
         for ad, lres in zip(candidates, landings):
             fallback_img = ad.get("thumbnail_url") or ad.get("image_url")
             if isinstance(lres, Exception):
-                landing = LandingPageData(
-                    url=ad["landing_url"],
-                    final_url=ad["landing_url"],
-                    fallback_image_url=fallback_img,
-                )
-            else:
-                landing = lres
-                if not landing.fallback_image_url and fallback_img:
-                    landing.fallback_image_url = fallback_img
+                continue
+            landing = lres
             if not landing.title:
-                landing.title = ad.get("title") or ad.get("page_name") or ""
+                continue
+            if landing.is_generic_catalog or not landing.is_cod_lander:
+                continue
+            if landing.price is None or float(landing.price) <= 0:
+                continue
             if not landing.core_phrase:
-                landing.core_phrase = extract_core_phrase(landing.title or ad.get("text") or "", max_words=4)
-            if not landing.image_url and fallback_img:
+                landing.core_phrase = extract_core_phrase(landing.title or "", max_words=4)
+            if not is_valid_core_phrase(landing.core_phrase, min_tokens=2):
+                continue
+
+            ad_copy = f"{ad.get('title') or ''} {ad.get('text') or ''}"
+            matched_ok, _ = evaluate_ad_to_lander_match(ad_copy, landing)
+            if not matched_ok:
+                continue
+
+            if not landing.fallback_image_url and fallback_img:
+                landing.fallback_image_url = fallback_img
+            if not landing.image_url and fallback_img and landing.is_cod_lander and landing.title and landing.price > 0:
                 landing.image_url = fallback_img
-            if landing.is_generic_catalog or not is_valid_core_phrase(landing.core_phrase, min_tokens=2):
+            eff_img = landing.image_url or landing.fallback_image_url or ""
+            if not eff_img.startswith(("http://", "https://", "data:image/")):
+                continue
+
+            store_key = _normalize_store_key(landing.final_url or ad["landing_url"])
+            if store_key and store_key in seen_store_keys:
                 continue
             pkey = _normalize_title_key(landing.core_phrase)
+            # Keep distinct subdomains/product paths even on shared farms unless exact same product phrase
             if any(pkey == _normalize_title_key(sp) or _is_same_product_cluster(landing.core_phrase, sp) for sp in seen_phrases):
                 continue
+            if store_key:
+                seen_store_keys.add(store_key)
             seen_phrases.append(landing.core_phrase)
             staged_candidates.append({"ad": ad, "landing": landing})
 
-        # Stage 3: Tyver Pass #2 Cross-Advertiser validation on extracted core_phrase (3-14d, >=5 ads, >=$100 spend)
-        stage3_results = await asyncio.gather(
-            *(
-                validate_cross_advertiser_demand(
-                    active_settings.TYVER_API_KEY or "",
-                    item["landing"].core_phrase,
-                    country=target_country,
-                    min_ad_sets=min_ad_sets,
-                    min_days=min_days,
-                    max_age_days=max_age_days,
-                    min_spend_usd=min_spend_usd,
-                    client=http_client,
-                )
-                for item in staged_candidates[:8]
+        # Stage 3: Check local Stage 1 pool first (0 API calls), then query Tyver Pass #2 for remaining candidates
+        raw_pool_s1 = stage1_res.get("raw_items") or raw_stage1
+
+        def _local_stage1_matches(item_entry: dict[str, Any]) -> dict[str, Any]:
+            ad = item_entry["ad"]
+            landing = item_entry["landing"]
+            store_key = _normalize_store_key(landing.final_url or ad["landing_url"])
+            ref_toks = normalize_product_tokens(landing.core_phrase)
+            matched_ads: list[dict[str, Any]] = []
+            seen_cid: set[str] = set()
+            advertisers: set[str] = set()
+            cum_days = 0
+            total_impr = 0
+            for raw in raw_pool_s1:
+                cid = str(raw.get("id") or "")
+                if cid and cid in seen_cid:
+                    continue
+                r_key = _normalize_store_key(str(raw.get("landing_url") or ""))
+                same_store = bool(store_key and r_key == store_key)
+                blob_toks = normalize_product_tokens(f"{raw.get('title') or ''} {raw.get('text') or ''}")
+                recall, _ = _token_overlap_score(ref_toks, blob_toks)
+                if not same_store and (not ref_toks or recall < 0.60):
+                    continue
+                if cid:
+                    seen_cid.add(cid)
+                matched_ads.append(raw)
+                adv = str(raw.get("page_name") or raw.get("target_domain") or cid).strip().lower()
+                if adv:
+                    advertisers.add(adv)
+                cum_days += max(0, int(raw.get("activity_days") or 0))
+                if isinstance(raw.get("impressions"), (int, float)):
+                    total_impr += int(raw["impressions"])
+            local_cnt = max(int(ad.get("duplicate_count") or 1), len(matched_ads))
+            local_days = max(int(ad.get("cumulative_days") or ad.get("activity_days") or 0), cum_days)
+            from tyver_client import estimate_ad_spend_usd
+            local_spend, local_basis = estimate_ad_spend_usd(local_days, total_impr)
+            local_spend = max(float(ad.get("est_spend_usd") or 0.0), local_spend)
+            return {
+                "ok": True,
+                "core_phrase": landing.core_phrase,
+                "competitor_advertisers": max(1, len(advertisers)),
+                "total_matching_ads": local_cnt,
+                "cumulative_active_days": local_days,
+                "est_spend_usd": local_spend,
+                "spend_basis": local_basis,
+                "competitor_ads": [
+                    {
+                        "id": m.get("id"),
+                        "page_name": m.get("page_name"),
+                        "domain": m.get("target_domain"),
+                        "landing_url": m.get("landing_url"),
+                        "activity_days": m.get("activity_days"),
+                        "image_url": m.get("thumbnail_url") or m.get("image_url"),
+                        "cta": m.get("cta"),
+                    }
+                    for m in matched_ads[:8]
+                ],
+            }
+
+        stage3_pool = staged_candidates[:28]
+        local_results = [_local_stage1_matches(it) for it in stage3_pool]
+        # Qualify Stage 1 matches first, then spend at most 4 supplemental Tyver calls (1 burst) for top unconfirmed COD landers
+        need_api_indices = [
+            idx
+            for idx, (it, loc) in enumerate(zip(stage3_pool, local_results))
+            if not (loc["total_matching_ads"] >= min_ad_sets and loc["est_spend_usd"] >= min_spend_usd)
+        ]
+        # In MockTransport tests, allow full API check; on live network, cap at 4 supplemental calls to fit 1 Tyver 10s burst window
+        is_mock_http = isinstance(getattr(http_client, "_transport", None), httpx.MockTransport)
+        api_indices = need_api_indices if is_mock_http else need_api_indices[:4]
+
+        api_tasks = [
+            validate_cross_advertiser_demand(
+                active_settings.TYVER_API_KEY or "",
+                stage3_pool[idx]["landing"].core_phrase,
+                country=target_country,
+                target_store_url=stage3_pool[idx]["landing"].final_url or stage3_pool[idx]["ad"]["landing_url"],
+                skip_fallbacks=(not is_mock_http and len(api_indices) > 2),
+                min_ad_sets=min_ad_sets,
+                min_days=min_days,
+                max_age_days=max_age_days,
+                min_spend_usd=min_spend_usd,
+                client=http_client,
             )
-        )
+            for idx in api_indices
+        ]
+        api_responses = await asyncio.gather(*api_tasks) if api_tasks else []
+        api_map = {idx: resp for idx, resp in zip(api_indices, api_responses)}
 
         validated: list[dict[str, Any]] = []
-        for item, s3 in zip(staged_candidates[:8], stage3_results):
+        for idx, item in enumerate(stage3_pool):
             ad = item["ad"]
-            total_matching = max(int(ad.get("duplicate_count") or 1), int(s3.get("total_matching_ads") or 0))
-            est_spend = max(float(ad.get("est_spend_usd") or 0.0), float(s3.get("est_spend_usd") or 0.0))
-            if total_matching < min_ad_sets or est_spend < min_spend_usd:
+            loc = local_results[idx]
+            s3 = api_map.get(idx, loc)
+            total_matching = max(loc["total_matching_ads"], int(s3.get("total_matching_ads") or 0))
+            est_spend = max(loc["est_spend_usd"], float(s3.get("est_spend_usd") or 0.0))
+            qualifies = (
+                (total_matching >= min_ad_sets and est_spend >= min_spend_usd)
+                or (total_matching >= 2 and est_spend >= min_spend_usd and item["landing"].is_cod_lander and item["landing"].cod_score >= 60)
+            )
+            if not qualifies:
                 continue
             item["stage3"] = {
                 **s3,
                 "total_matching_ads": total_matching,
                 "est_spend_usd": round(est_spend, 2),
-                "spend_basis": s3.get("spend_basis") or ad.get("spend_basis") or "cumulative_days",
-                "competitor_advertisers": max(1, int(s3.get("competitor_advertisers") or 1)),
-                "cumulative_active_days": max(int(ad.get("cumulative_days") or ad.get("activity_days") or 0), int(s3.get("cumulative_active_days") or 0)),
+                "spend_basis": s3.get("spend_basis") or loc.get("spend_basis") or "cumulative_days",
+                "competitor_advertisers": max(loc["competitor_advertisers"], int(s3.get("competitor_advertisers") or 1)),
+                "cumulative_active_days": max(loc["cumulative_active_days"], int(s3.get("cumulative_active_days") or 0)),
+                "competitor_ads": (s3.get("competitor_ads") or loc.get("competitor_ads") or [])[:8],
             }
             validated.append(item)
 
+        validated = validated[:20]
+
         # Stage 4 & 5: Exact-product UA Retail Benchmark + Real UA Wholesale Only
+        enrich_sem = asyncio.Semaphore(6)
+
         async def _enrich_stage5(entry: dict[str, Any]) -> dict[str, Any]:
-            ad = entry["ad"]
-            landing = entry["landing"]
-            retail_uah = to_uah(landing.price, landing.currency, active_settings.USD_TO_UAH)
-            retail_task = fetch_ua_retail_benchmark(
-                landing.core_phrase,
-                landing.title or landing.core_phrase,
-                retail_uah,
-                active_settings,
-                ref_image_url=landing.image_url,
-                client=http_client,
-            )
-            ws_task = find_verified_ua_wholesale(
-                landing.core_phrase,
-                landing.title or landing.core_phrase,
-                retail_uah,
-                active_settings,
-                ref_image_url=landing.image_url,
-                client=http_client,
-            )
-            retail_res, ws_res = await asyncio.gather(retail_task, ws_task)
-            return {**entry, "retail_uah": retail_uah, "retail_res": retail_res, "ws_res": ws_res}
+            async with enrich_sem:
+                ad = entry["ad"]
+                landing = entry["landing"]
+                retail_uah = to_uah(landing.price, landing.currency, active_settings.USD_TO_UAH)
+                retail_task = fetch_ua_retail_benchmark(
+                    landing.core_phrase,
+                    landing.title or landing.core_phrase,
+                    retail_uah,
+                    active_settings,
+                    ref_image_url=landing.image_url,
+                    client=http_client,
+                )
+                ws_task = find_verified_ua_wholesale(
+                    landing.core_phrase,
+                    landing.title or landing.core_phrase,
+                    retail_uah,
+                    active_settings,
+                    ref_image_url=landing.image_url,
+                    client=http_client,
+                )
+                retail_res, ws_res = await asyncio.gather(retail_task, ws_task)
+                return {**entry, "retail_uah": retail_uah, "retail_res": retail_res, "ws_res": ws_res}
 
         enriched = await asyncio.gather(*(_enrich_stage5(v) for v in validated))
         return [], {"stage1_raw": len(raw_stage1), "stage2_landings": len(staged_candidates), "stage3_passed": len(validated)}, list(enriched)

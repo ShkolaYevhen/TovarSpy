@@ -249,6 +249,49 @@ class TestLandingParser(unittest.IsolatedAsyncioTestCase):
             dna = detect_cod_lander_dna(html, "https://pirnay.ua/collections/all")
             self.assertTrue(dna["is_generic_catalog"])
 
+    def test_soft_404_courses_filter_urls_and_anatomic_goodstorre_dna(self) -> None:
+        soft_404 = "<html><head><title>Сторінку не знайдено</title></head><body><h1>404</h1></body></html>"
+        p404 = parse_landing_html(soft_404, "https://tandem-greenshop.com.ua/item")
+        self.assertTrue(p404.is_generic_catalog)
+        self.assertFalse(p404.is_cod_lander)
+
+        course_html = """
+        <html><head><title>3D-друк з нуля за 5 днів — до готової моделі</title></head>
+        <body><p>Модуль 1, тариф базовий, ментор</p><span class="price">2900 грн</span></body></html>
+        """
+        pcourse = parse_landing_html(course_html, "https://druk440.vladpro3d.com/")
+        self.assertTrue(pcourse.is_generic_catalog)
+        self.assertFalse(pcourse.is_cod_lander)
+
+        filter_html = """
+        <html><head><title>Постільні комплекти сатин</title></head>
+        <body><form><input name="name"/><input name="phone"/></form><span class="price">2200 грн</span></body></html>
+        """
+        pfilter = parse_landing_html(filter_html, "https://drimland.com.ua/postilni-komplekty/filter/")
+        self.assertTrue(pfilter.is_generic_catalog)
+        self.assertFalse(pfilter.is_cod_lander)
+
+        # Archetype 4: anatomic.goodstorre.shop (tel form without name input, 70 грн shipping ignored, relative webp)
+        anatomic_html = """
+        <html>
+          <head><title>Термобілизна Anatomic — тепла флісова</title></head>
+          <body>
+            <img src="assets/logo.png" />
+            <img src="assets/0339693cc8367bd71e1d.jpg.webp" />
+            <span>Доставка 70 грн Нова Пошта, оплата після отримання</span>
+            <del>2499 грн</del>
+            <div class="new-price">1 798 ₴</div>
+            <form><input type="tel" name="phone" /><button type="submit">Замовити</button></form>
+          </body>
+        </html>
+        """
+        p4 = parse_landing_html(anatomic_html, "https://anatomic.goodstorre.shop/")
+        self.assertTrue(p4.is_cod_lander)
+        self.assertFalse(p4.is_generic_catalog)
+        self.assertGreaterEqual(p4.cod_score, 90)
+        self.assertAlmostEqual(p4.price or 0.0, 1798.0)
+        self.assertEqual(p4.image_url, "https://anatomic.goodstorre.shop/assets/0339693cc8367bd71e1d.jpg.webp")
+
 
 if __name__ == "__main__":
     unittest.main()

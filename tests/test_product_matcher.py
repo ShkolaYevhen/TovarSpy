@@ -4,8 +4,10 @@ import unittest
 from PIL import Image, ImageDraw
 
 from product_matcher import (
+    build_stage3_search_phrases,
     compute_dhash,
     dhash_similarity,
+    evaluate_ad_to_lander_match,
     evaluate_product_match,
     extract_core_phrase,
     extract_model_tokens,
@@ -113,6 +115,30 @@ class TestProductMatcher(unittest.TestCase):
         self.assertFalse(is_valid_core_phrase("Бестселери Каталог"))
         self.assertFalse(is_valid_core_phrase("масажер"))
         self.assertTrue(is_valid_core_phrase("масажер перкусійний"))
+        self.assertEqual(
+            build_stage3_search_phrases("роликовий масажер massager neck"),
+            ["роликовий масажер massager neck", "роликовий масажер"],
+        )
+
+        class _CodLander:
+            is_generic_catalog = False
+            is_cod_lander = True
+            cod_score = 80
+            price = 598.0
+            title = "EMS електричний масажер для стоп"
+            core_phrase = "ems електричний масажер стоп"
+
+        ok_story, reason = evaluate_ad_to_lander_match("Мій чоловік зайшов у вітальню і здивувався", _CodLander())
+        self.assertTrue(ok_story, reason)
+
+        class _NonCodLander:
+            is_generic_catalog = False
+            is_cod_lander = False
+            cod_score = 15
+            price = 598.0
+
+        bad_noncod, _ = evaluate_ad_to_lander_match("EMS масажер", _NonCodLander())
+        self.assertFalse(bad_noncod)
 
 
 if __name__ == "__main__":

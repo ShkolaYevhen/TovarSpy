@@ -16,8 +16,9 @@ DEFAULT_FX_RATES_TO_USD: dict[str, float] = {
 
 # Ad discovery & COD filtering thresholds
 COD_DISCOVERY_SIGNALS: tuple[str, ...] = (
-    "Нова Пошта",
     "Оплата при отриманні",
+    "Оплата після отримання",
+    "Нова Пошта",
     "замовити зі знижкою",
 )
 DROPSHIP_DOMAIN_TLDS: tuple[str, ...] = (
@@ -26,6 +27,7 @@ DROPSHIP_DOMAIN_TLDS: tuple[str, ...] = (
     ".space",
     ".online",
     ".site",
+    ".top",
     ".com.ua",
 )
 DROPSHIP_CTAS: tuple[str, ...] = ("Shop Now", "Order Now", "Buy Now")

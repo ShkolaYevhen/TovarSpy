@@ -448,6 +448,71 @@ class TestTyverClient(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(res["est_spend_usd"], 120.0)
         self.assertTrue(res["meets_spend_threshold"])
 
+    async def test_429_retry_no_lang_lock_in_link_and_early_url_filters(self) -> None:
+        calls = 0
+        seen_in_links: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            qs = parse_qs(urlparse(str(request.url)).query)
+            self.assertNotIn("languages", qs)
+            if calls <= 2:
+                return httpx.Response(429, headers={"Retry-After": "0.01"}, json={"detail": "Too Many Requests"})
+            if qs.get("in_link"):
+                seen_in_links.extend(qs["in_link"])
+            return httpx.Response(
+                200,
+                json={
+                    "detail": "Success",
+                    "data": {
+                        "items": [
+                            {
+                                "provider_id": "anatomic-1",
+                                "activity_days_amount": 5,
+                                "bodies": ["Термобілизна Anatomic Нова Пошта"],
+                                "link_titles": ["Термобілизна Anatomic"],
+                                "countries": ["UA"],
+                                "provider_page_name": "GoodStorre",
+                                "target_url": "https://anatomic.goodstorre.shop/",
+                                "domain": "anatomic.goodstorre.shop",
+                            },
+                            {
+                                "provider_id": "course-1",
+                                "activity_days_amount": 10,
+                                "bodies": ["3D-друк з нуля за 5 днів"],
+                                "countries": ["UA"],
+                                "provider_page_name": "Academy",
+                                "target_url": "https://druk.vladpro3d.com/courses/start",
+                            },
+                            {
+                                "provider_id": "filter-1",
+                                "activity_days_amount": 8,
+                                "bodies": ["Постільні комплекти"],
+                                "countries": ["UA"],
+                                "provider_page_name": "CartumShop",
+                                "target_url": "https://drimland.com.ua/postilni-komplekty/filter/",
+                            },
+                        ],
+                        "total": 3,
+                    },
+                },
+            )
+
+        with patch("tyver_client.asyncio.sleep", new=AsyncMock()):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                res = await discover_winning_ads("tyv_abc", country="UA", query="", client=client)
+
+        self.assertTrue(res["ok"])
+        self.assertGreaterEqual(calls, 3)
+        for tld in (".store", ".shop", ".space", ".site"):
+            self.assertIn(tld, seen_in_links)
+        self.assertEqual(len(res["items"]), 1)
+        self.assertEqual(res["items"][0]["target_domain"], "anatomic.goodstorre.shop")
+        self.assertTrue(res["items"][0]["is_dropship_url"])
+        self.assertFalse(is_ecom_store_candidate({"landing_url": "https://shop.ua/postilni/filter/"}))
+        self.assertFalse(is_ecom_store_candidate({"landing_url": "https://site.ua/item", "title": "3D-друк з нуля за 5 днів"}))
+
 
 class TestTyverWebEndpoints(unittest.TestCase):
     def test_tyver_quota_and_search_routes_and_no_secret_leak(self) -> None:

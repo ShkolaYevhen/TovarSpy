@@ -1,25 +1,38 @@
 import asyncio
+from collections import deque
 from datetime import date, timedelta
 import logging
+import time
 from typing import Any, Optional
 from urllib.parse import urlparse
+import weakref
 
 import httpx
 
 from config import (
     COD_DISCOVERY_SIGNALS,
     DROPSHIP_CTAS,
+    DROPSHIP_DOMAIN_TLDS,
     EST_DAILY_SPEND_PER_CREATIVE_USD,
     MARKETPLACE_BLOCKLIST,
     MAX_AD_AGE_DAYS,
     MIN_DURATION_DAYS,
     MIN_EST_SPEND_USD,
 )
-from product_matcher import _token_overlap_score, is_valid_core_phrase, normalize_product_tokens
+from product_matcher import (
+    _token_overlap_score,
+    build_stage3_search_phrases,
+    is_valid_core_phrase,
+    normalize_product_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
 TYVER_BASE_URL = "https://api.tyver.io/public/v1"
+_TYVER_SEMAPHORES: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+_TYVER_CALL_WINDOWS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, deque[float]] = weakref.WeakKeyDictionary()
+_TYVER_WINDOW_MAX_CALLS = 4
+_TYVER_WINDOW_SECONDS = 10.3
 
 _JUNK_STORE_DOMAINS: tuple[str, ...] = (
     "amazon.",
@@ -42,17 +55,69 @@ _COLLECTION_URL_HINTS: tuple[str, ...] = (
     "/catalog",
     "/category",
     "/categories",
+    "/filter",
+    "/course",
+    "/courses",
+    "/webinar",
+    "/afisha",
+    "/ticket",
+    "/kvytky",
+    "/blog",
+    "/news",
+    "/search",
+    "/cart",
+)
+
+_BINARY_URL_EXTENSIONS: tuple[str, ...] = (
+    ".webm", ".mp4", ".mov", ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".zip",
 )
 
 _NON_ECOM_KEYWORDS: tuple[str, ...] = (
     "casino", "казино", "slots", "aviator", "betting", "букмекер", "фриспин", "фріспін",
     "бонус на депозит", "1win", "pin-up", "pinup", "parimatch", "favbet", "vbet",
     "cosmolot", "vulkan", "вулкан", "клініка", "стоматолог", "вебінар", "таро", "астролог",
+    "з нуля за", "курс ", "курси ", "навчання", "інтенсив", "майстер-клас", "тренінг",
+    "афіша", "afisha", "квитки", "концерт", "вакансія", "оренда", "кредит", "позика",
 )
 
 
 def _auth_headers(api_key: str) -> dict[str, str]:
     return {"X-Tyver-Authorization": api_key.strip()}
+
+
+def _get_tyver_semaphore() -> Optional[asyncio.Semaphore]:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    sem = _TYVER_SEMAPHORES.get(loop)
+    if sem is None:
+        sem = asyncio.Semaphore(1)
+        _TYVER_SEMAPHORES[loop] = sem
+    return sem
+
+
+async def _pace_live_tyver_request() -> None:
+    """Enforce Tyver's empirical 4 requests / 10s sliding window cleanly to prevent HTTP 429 stalls."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    win = _TYVER_CALL_WINDOWS.get(loop)
+    if win is None:
+        win = deque()
+        _TYVER_CALL_WINDOWS[loop] = win
+    now = time.monotonic()
+    while win and (now - win[0]) >= _TYVER_WINDOW_SECONDS:
+        win.popleft()
+    if len(win) >= _TYVER_WINDOW_MAX_CALLS:
+        wait = _TYVER_WINDOW_SECONDS - (now - win[0])
+        if wait > 0:
+            await asyncio.sleep(wait)
+        now = time.monotonic()
+        while win and (now - win[0]) >= _TYVER_WINDOW_SECONDS:
+            win.popleft()
+    win.append(now)
 
 
 async def _tyver_get(
@@ -61,12 +126,16 @@ async def _tyver_get(
     params: Optional[list[tuple[str, Any]]] = None,
     client: Optional[httpx.AsyncClient] = None,
     proxy: Optional[str] = None,
+    max_retries: int = 3,
 ) -> tuple[int, Any, str]:
-    """Perform an authenticated GET against the Tyver Public API without logging secrets."""
+    """Perform a rate-limited authenticated GET against Tyver with HTTP 429 exponential backoff."""
     url = f"{TYVER_BASE_URL}{path}"
     headers = _auth_headers(api_key)
+    sem = _get_tyver_semaphore()
 
-    async def _run(http_client: httpx.AsyncClient) -> tuple[int, Any, str]:
+    async def _attempt_once(http_client: httpx.AsyncClient) -> tuple[int, Any, str, Optional[float]]:
+        if not isinstance(getattr(http_client, "_transport", None), httpx.MockTransport):
+            await _pace_live_tyver_request()
         resp = await http_client.get(url, headers=headers, params=params)
         text_preview = ""
         try:
@@ -74,13 +143,38 @@ async def _tyver_get(
         except ValueError:
             payload = None
             text_preview = resp.text[:240]
-        return resp.status_code, payload, text_preview
+        retry_after: Optional[float] = None
+        if resp.status_code == 429:
+            raw_ra = resp.headers.get("Retry-After")
+            if raw_ra:
+                try:
+                    retry_after = max(0.5, min(8.0, float(raw_ra)))
+                except ValueError:
+                    retry_after = None
+        return resp.status_code, payload, text_preview, retry_after
+
+    async def _run_with_backoff(http_client: httpx.AsyncClient) -> tuple[int, Any, str]:
+        backoffs = (1.5, 3.0, 6.0)
+        for attempt in range(max_retries + 1):
+            status_code, payload, text_preview, retry_after = await _attempt_once(http_client)
+            if status_code != 429 or attempt >= max_retries:
+                return status_code, payload, text_preview
+            delay = retry_after if retry_after is not None else backoffs[min(attempt, len(backoffs) - 1)]
+            logger.info("Tyver HTTP 429 on %s; retrying in %.1fs (attempt %d/%d)", path, delay, attempt + 1, max_retries)
+            await asyncio.sleep(delay)
+        return 429, None, "Rate limited"
 
     try:
+        if sem is not None:
+            async with sem:
+                if client is not None:
+                    return await _run_with_backoff(client)
+                async with httpx.AsyncClient(timeout=20.0, proxy=proxy, follow_redirects=True) as owned:
+                    return await _run_with_backoff(owned)
         if client is not None:
-            return await _run(client)
+            return await _run_with_backoff(client)
         async with httpx.AsyncClient(timeout=20.0, proxy=proxy, follow_redirects=True) as owned:
-            return await _run(owned)
+            return await _run_with_backoff(owned)
     except httpx.HTTPError as exc:
         logger.warning("Tyver request to %s failed: %s", path, type(exc).__name__)
         return 0, None, str(exc)
@@ -229,6 +323,7 @@ async def fetch_tyver_creatives(
     languages: Optional[list[str]] = None,
     cta: Optional[str | list[str]] = None,
     cms: Optional[str | list[str]] = None,
+    in_link: Optional[str] = None,
     sort: str = "activity_days_amount",
     cursor: Optional[str] = None,
     page: int = 1,
@@ -289,6 +384,8 @@ async def fetch_tyver_creatives(
                 params.append(("cms", cms_val.strip()))
     elif cms:
         params.append(("cms", cms))
+    if in_link and in_link.strip():
+        params.append(("in_link", in_link.strip()))
     if cursor:
         params.append(("cursor", cursor))
 
@@ -387,6 +484,23 @@ def estimate_ad_spend_usd(
     return days_spend, "cumulative_days"
 
 
+def is_dropship_url_pattern(url: str) -> bool:
+    """Return True if URL resembles a UA single-product COD funnel (e.g. x.goodstorre.shop, y.domely.com.ua, /p/123)."""
+    parsed = urlparse((url or "").strip())
+    host = parsed.netloc.lower().split(":")[0].removeprefix("www.")
+    if not host:
+        return False
+    path = (parsed.path or "").lower()
+    if "/p/" in path:
+        return True
+    labels = [p for p in host.split(".") if p]
+    if host.endswith(".com.ua") and len(labels) >= 4:
+        return True
+    if any(host.endswith(tld) for tld in DROPSHIP_DOMAIN_TLDS if tld != ".com.ua"):
+        return True
+    return False
+
+
 def is_ecom_store_candidate(creative: dict[str, Any]) -> bool:
     """Return True if a Tyver creative targets a genuine physical-goods web store/landing."""
     landing = str(creative.get("landing_url") or "").strip()
@@ -404,6 +518,8 @@ def is_ecom_store_candidate(creative: dict[str, Any]) -> bool:
             return False
 
     path_lower = (parsed.path or "").lower()
+    if any(path_lower.endswith(ext) for ext in _BINARY_URL_EXTENSIONS):
+        return False
     if any(hint in path_lower for hint in _COLLECTION_URL_HINTS):
         return False
 
@@ -433,22 +549,29 @@ async def discover_winning_ads(
     client: Optional[httpx.AsyncClient] = None,
     proxy: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Stage 1: Discover active 3-14d e-commerce/COD ad winners from Tyver.io and deduplicate by landing."""
+    """Stage 1: Discover active 3-14d e-commerce/COD ad winners from Tyver.io without uk lang lock."""
     age_cap = max(min_days, int(lookback_days if lookback_days is not None else max_age_days))
     since_date = (date.today() - timedelta(days=age_cap)).isoformat()
     target_country = (country or "UA").strip().upper()
     clean_q = (query or "").strip()
-    langs = languages if languages is not None else (["uk"] if target_country == "UA" else [])
+    # CRITICAL: Never default to languages=["uk"]; real COD landers (domely, goodstorre, zario, testishop) have lang=[].
+    langs = list(languages) if languages is not None else []
     cta_list = ctas if ctas is not None else list(DROPSHIP_CTAS)
 
-    search_queries: list[str]
+    # Tuple of (search_query, cta_override, in_link_filter)
+    query_specs: list[tuple[str, Optional[list[str]], Optional[str]]]
     if clean_q:
-        search_queries = [clean_q]
+        query_specs = [(clean_q, cta_list, None)]
     elif target_country == "UA":
-        # Auto-discover diverse COD landers across proven UA cash-on-delivery queries + general CTA scan.
-        search_queries = ["", *COD_DISCOVERY_SIGNALS]
+        query_specs = [
+            *[(sig, None, None) for sig in COD_DISCOVERY_SIGNALS],
+            ("ціна", None, ".store"),
+            ("", cta_list, ".shop"),
+            ("", cta_list, ".space"),
+            ("", cta_list, ".site"),
+        ]
     else:
-        search_queries = [""]
+        query_specs = [("", cta_list, None)]
 
     tasks = [
         fetch_tyver_creatives(
@@ -460,13 +583,14 @@ async def discover_winning_ads(
             activity_days_amount_lte=age_cap,
             creation_date_gte=since_date,
             languages=langs,
-            cta=cta_list,
+            cta=spec_cta,
+            in_link=spec_in_link,
             sort="activity_days_amount",
             page_size=page_size,
             client=client,
             proxy=proxy,
         )
-        for sq in search_queries
+        for sq, spec_cta, spec_in_link in query_specs
     ]
     responses = await asyncio.gather(*tasks)
     ok_responses = [r for r in responses if r.get("ok")]
@@ -502,6 +626,7 @@ async def discover_winning_ads(
             copy["creative_ids"] = [item["id"]] if item.get("id") else []
             copy["cumulative_days"] = item_days
             copy["_total_impressions"] = item_impr
+            copy["is_dropship_url"] = is_dropship_url_pattern(item["landing_url"])
             grouped[key] = copy
         else:
             existing["duplicate_count"] += 1
@@ -525,6 +650,7 @@ async def discover_winning_ads(
 
     deduped.sort(
         key=lambda x: (
+            1 if x.get("is_dropship_url") else 0,
             int(x.get("duplicate_count") or 1),
             float(x.get("est_spend_usd") or 0.0),
             int(x.get("activity_days") or 0),
@@ -536,6 +662,7 @@ async def discover_winning_ads(
         "mode": "ecom_ua",
         "total": api_total or len(deduped),
         "raw_count": len(raw_items),
+        "raw_items": raw_items,
         "items": deduped,
         "error": None,
     }
@@ -546,6 +673,8 @@ async def validate_cross_advertiser_demand(
     core_phrase: str,
     *,
     country: str = "UA",
+    target_store_url: str = "",
+    skip_fallbacks: bool = False,
     min_ad_sets: int = 5,
     min_days: int = MIN_DURATION_DAYS,
     max_age_days: int = MAX_AD_AGE_DAYS,
@@ -553,7 +682,7 @@ async def validate_cross_advertiser_demand(
     client: Optional[httpx.AsyncClient] = None,
     proxy: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Stage 3: Query Tyver Pass #2 for core_phrase across advertisers within 3-14d to validate ad spend."""
+    """Stage 3: Query Tyver Pass #2 for core_phrase + scoped store URL within 3-14d to validate ad spend."""
     clean_phrase = (core_phrase or "").strip()
     if not is_valid_core_phrase(clean_phrase, min_tokens=2) or not (api_key or "").strip():
         return {
@@ -572,11 +701,15 @@ async def validate_cross_advertiser_demand(
         }
 
     since_date = (date.today() - timedelta(days=max(min_days, max_age_days))).isoformat()
-    res = await fetch_tyver_creatives(
+    target_country = (country or "UA").strip().upper()
+    target_store_key = _normalize_store_key(target_store_url) if target_store_url else ""
+
+    search_phrases = build_stage3_search_phrases(clean_phrase) or [clean_phrase]
+    first_res = await fetch_tyver_creatives(
         api_key=api_key,
         mode="ecom_ua",
-        query=clean_phrase,
-        countries=[(country or "UA").strip().upper()],
+        query=search_phrases[0],
+        countries=[target_country],
         activity_days_amount_gte=max(1, min_days),
         activity_days_amount_lte=max(min_days, max_age_days),
         creation_date_gte=since_date,
@@ -585,7 +718,7 @@ async def validate_cross_advertiser_demand(
         client=client,
         proxy=proxy,
     )
-    if not res.get("ok"):
+    if not first_res.get("ok"):
         return {
             "ok": False,
             "core_phrase": clean_phrase,
@@ -598,25 +731,88 @@ async def validate_cross_advertiser_demand(
             "meets_ad_sets_threshold": False,
             "meets_spend_threshold": False,
             "competitor_ads": [],
-            "error": res.get("error"),
+            "error": first_res.get("error"),
         }
 
-    ref_tokens = normalize_product_tokens(clean_phrase)
-    matched: list[dict[str, Any]] = []
+    raw_pool: list[dict[str, Any]] = list(first_res.get("items") or [])
+    seen_ids: set[str] = {str(x.get("id") or "") for x in raw_pool if x.get("id")}
+    api_total_raw = int(first_res.get("total") or 0)
+
+    def _collect_matches(items: list[dict[str, Any]], phrase_str: str) -> list[dict[str, Any]]:
+        tokens = normalize_product_tokens(phrase_str)
+        out: list[dict[str, Any]] = []
+        for item in items:
+            if not is_ecom_store_candidate(item):
+                continue
+            if not within_ad_age_window(item, min_days=max(1, min_days), max_age_days=max(min_days, max_age_days)):
+                continue
+            item_key = _normalize_store_key(str(item.get("landing_url") or ""))
+            same_exact_funnel = bool(target_store_key and item_key == target_store_key)
+            blob_tokens = normalize_product_tokens(f"{item.get('title') or ''} {item.get('text') or ''}")
+            recall, _ = _token_overlap_score(tokens, blob_tokens)
+            if not same_exact_funnel and tokens and recall < 0.60:
+                continue
+            out.append(item)
+        return out
+
+    matched = _collect_matches(raw_pool, clean_phrase)
+
+    # Scoped story-hook recovery: query exact host+path (never bare shared root) + optional 2-word noun phrase
+    if not skip_fallbacks and len(matched) < min_ad_sets and target_store_key:
+        scoped_res = await fetch_tyver_creatives(
+            api_key=api_key,
+            mode="ecom_ua",
+            query="",
+            countries=[target_country],
+            activity_days_amount_gte=max(1, min_days),
+            activity_days_amount_lte=max(min_days, max_age_days),
+            creation_date_gte=since_date,
+            in_link=target_store_key,
+            sort="activity_days_amount",
+            page_size=60,
+            client=client,
+            proxy=proxy,
+        )
+        if scoped_res.get("ok"):
+            for item in scoped_res.get("items") or []:
+                cid = str(item.get("id") or "")
+                if cid and cid in seen_ids:
+                    continue
+                if cid:
+                    seen_ids.add(cid)
+                raw_pool.append(item)
+            matched = _collect_matches(raw_pool, clean_phrase)
+
+    if not skip_fallbacks and len(matched) < min_ad_sets and len(search_phrases) > 1:
+        short_phrase = search_phrases[1]
+        short_res = await fetch_tyver_creatives(
+            api_key=api_key,
+            mode="ecom_ua",
+            query=short_phrase,
+            countries=[target_country],
+            activity_days_amount_gte=max(1, min_days),
+            activity_days_amount_lte=max(min_days, max_age_days),
+            creation_date_gte=since_date,
+            sort="activity_days_amount",
+            page_size=60,
+            client=client,
+            proxy=proxy,
+        )
+        if short_res.get("ok"):
+            api_total_raw = max(api_total_raw, int(short_res.get("total") or 0))
+            for item in short_res.get("items") or []:
+                cid = str(item.get("id") or "")
+                if cid and cid in seen_ids:
+                    continue
+                if cid:
+                    seen_ids.add(cid)
+                raw_pool.append(item)
+            matched = _collect_matches(raw_pool, short_phrase)
+
     advertisers: set[str] = set()
     cum_days = 0
     total_impr = 0
-
-    for item in res.get("items") or []:
-        if not is_ecom_store_candidate(item):
-            continue
-        if not within_ad_age_window(item, min_days=max(1, min_days), max_age_days=max(min_days, max_age_days)):
-            continue
-        blob_tokens = normalize_product_tokens(f"{item.get('title') or ''} {item.get('text') or ''}")
-        recall, _ = _token_overlap_score(ref_tokens, blob_tokens)
-        if ref_tokens and recall < 0.60:
-            continue
-        matched.append(item)
+    for item in matched:
         adv_key = str(item.get("page_name") or item.get("target_domain") or item.get("id") or "").strip().lower()
         if adv_key:
             advertisers.add(adv_key)
@@ -625,7 +821,7 @@ async def validate_cross_advertiser_demand(
             total_impr += int(item["impressions"])
 
     est_spend, spend_basis = estimate_ad_spend_usd(cum_days, total_impr)
-    total_ads = max(len(matched), int(res.get("total") or len(matched)) if matched else 0)
+    total_ads = max(len(matched), api_total_raw if matched else 0)
     compact_proofs = [
         {
             "id": m.get("id"),
